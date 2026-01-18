@@ -30,14 +30,12 @@ HalfGridPosition :: [2]i16
 
 Tile :: struct {
   playerIndex: u32,
-  position: HalfGridPosition,
   visibility: Visibility,
   type: TileType,
 }
 
 TileGrid :: struct {
-  tiles: [128]Tile,
-  tileCount: i32,
+  tiles: [1024]Tile,
   hexagonSize: i32,
   offset: [2]i32,
   size: i16,
@@ -159,9 +157,16 @@ render_gameboard :: proc(game: ^Game) {
     }
   }
 
-  for tile in tileGrid.tiles[0:tileGrid.tileCount] {
-      player := &game.players[tile.playerIndex]
-      fill_hexagon_halfgrid(tile.position, tileGrid.offset, player.color, tileGrid.hexagonSize)
+  for tile, i in tileGrid.tiles {
+    i := i16(i)
+
+    pos: HalfGridPosition = {(i % 32) - 16, (i / 32) - 16}
+
+    player := &game.players[tile.playerIndex]
+
+    if tile.type == .Land {
+      fill_hexagon_halfgrid(pos, tileGrid.offset, player.color, tileGrid.hexagonSize)
+    }
   }
 }
 
@@ -187,6 +192,12 @@ Game :: struct {
   screenSize: [2]i32,
 }
 
+get_tile :: proc(tileGrid: ^TileGrid, pos: HalfGridPosition) -> ^Tile {
+  idx := (pos.y + 16) * 32 + (pos.x + 16)
+  fmt.println(idx)
+  return &tileGrid.tiles[idx]
+}
+
 init_game :: proc(game: ^Game) {
   game.currentPlayerIndex = 0
 
@@ -209,18 +220,14 @@ init_game :: proc(game: ^Game) {
     hexagonSize = 30
   }
 
-  game.tileGrid.tileCount = 2
-
-  game.tileGrid.tiles[0] = Tile {
+  get_tile(&game.tileGrid, {3, 3})^ = Tile {
     playerIndex = 0,
     type = .Land,
-    position = {3, 3},
   }
   
-  game.tileGrid.tiles[1] = Tile {
+  get_tile(&game.tileGrid, {-3, -3})^ = Tile {
     playerIndex = 1,
     type = .Land,
-    position = {-3, -3},
   }
   
   half_length := i32(f32(game.tileGrid.hexagonSize) * math.sqrt_f32(3) / 3)
@@ -294,15 +301,11 @@ place_tile :: proc(game: ^Game) {
 
   player.energy -= req_energy
 
-  tile := &game.tileGrid.tiles[game.tileGrid.tileCount]
+  tile := get_tile(&game.tileGrid, halfgridPos)
 
   tile.playerIndex = game.currentPlayerIndex
-
-  tile.position = halfgridPos
   tile.visibility = .Invisible
   tile.type = player.selectedTileType
-
-  game.tileGrid.tileCount += 1
 }
 
 main :: proc() {
