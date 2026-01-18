@@ -20,6 +20,8 @@ Tile :: struct {
 
 TileGrid :: struct {
   tiles: [128]Tile,
+  hexagon_size: i32,
+  offset: [2]i32,
   size: i8,
 }
 
@@ -71,24 +73,24 @@ outline_hexagon :: proc(centerX: i32, centerY: i32, radius: i32, color: rl.Color
   rl.DrawLineStrip(raw_data(&points), 7, color)
 }
 
-render_tilegrid :: proc(tiles: ^TileGrid, offset: [2]i8) {
-  size: i32 = 20
+render_tilegrid :: proc(tileGrid: ^TileGrid) {
+  size: i32 = tileGrid.hexagon_size
   half_length := f32(size) * math.sqrt_f32(3) / 3
 
-  for i in i8(0)..<i8(20) {
-    for j in i8(0)..<i8(20) {
-      if i % 2 != j % 2 {
+  for i in i8(-15)..<i8(15) {
+    for j in i8(-15)..<i8(15) {
+      if abs(i) % 2 != abs(j) % 2 {
         continue;
       }
 
-      if within_halfgrid_range(tiles.size, offset, {i, j}) {
-        fill_hexagon_halfgrid(la.Vector2f32{f32(i), f32(j)}, rl.Color{0, 20, 128, 255})
+      if within_halfgrid_range(tileGrid.size, {i, j}) {
+        fill_hexagon_halfgrid(la.Vector2f32{f32(i), f32(j)}, tileGrid.offset, rl.Color{0, 20, 128, 255})
       }
     }
   }
 }
 
-get_halfgrid_pos :: proc(pos: la.Vector2f32, size: i32) -> la.Vector2f32 {
+get_halfgrid_pos_unoffset :: proc(pos: la.Vector2f32, size: i32) -> la.Vector2f32 {
   half_length := f32(size) * math.sqrt_f32(3) / 3
   half_size := f32(size) / 2
 
@@ -96,10 +98,10 @@ get_halfgrid_pos :: proc(pos: la.Vector2f32, size: i32) -> la.Vector2f32 {
   halfgrid.x /= 3 
   halfgrid.y /= 2
 
-  halfgrid.x = math.trunc_f32(halfgrid.x)
-  halfgrid.y = math.trunc_f32(halfgrid.y)
+  halfgrid.x = math.floor_f32(halfgrid.x)
+  halfgrid.y = math.floor_f32(halfgrid.y)
 
-  if i32(halfgrid.x) % 2 != i32(halfgrid.y) % 2 {
+  if i32(abs(halfgrid.x)) % 2 != i32(abs(halfgrid.y)) % 2 {
     a := la.Vector2f32{halfgrid.x + 1, halfgrid.y}
     b := la.Vector2f32{halfgrid.x, halfgrid.y + 1}
     c := la.Vector2f32{halfgrid.x - 1, halfgrid.y}
@@ -123,56 +125,98 @@ get_halfgrid_pos :: proc(pos: la.Vector2f32, size: i32) -> la.Vector2f32 {
   return halfgrid
 }
 
-fill_hexagon_halfgrid :: proc(halfgrid: la.Vector2f32, color: rl.Color) {
+get_halfgrid_pos :: proc(pos: la.Vector2f32, size: i32) -> la.Vector2f32 {
+  offset := la.Vector2f32{0, 0}
+  gridpos := get_halfgrid_pos_unoffset(pos + offset, size) - get_halfgrid_pos_unoffset(offset, size)
+  fmt.println(gridpos)
+  return gridpos
+}
+
+fill_hexagon_halfgrid :: proc(halfgrid: la.Vector2f32, offset: [2]i32, color: rl.Color) {
   size: i32 = 20
 
   half_length := f32(size) * math.sqrt_f32(3) / 3
-  fill_hexagon(i32((halfgrid.x + 0.5) * half_length * 3), i32((halfgrid.y + 1) * f32(size)), size, color)
+  fill_hexagon(i32((halfgrid.x + 0.5) * half_length * 3) + offset.x, i32((halfgrid.y + 1) * f32(size)) + offset.y, size, color)
 }
 
-outline_hexagon_halfgrid :: proc(halfgrid: la.Vector2f32, color: rl.Color) {
+outline_hexagon_halfgrid :: proc(halfgrid: la.Vector2f32, offset: [2]i32, color: rl.Color) {
   size: i32 = 20
 
   half_length := f32(size) * math.sqrt_f32(3) / 3
-  outline_hexagon(i32((halfgrid.x + 0.5) * half_length * 3), i32((halfgrid.y + 1) * f32(size)), size, color)
+  outline_hexagon(i32((halfgrid.x + 0.5) * half_length * 3) + offset.x, i32((halfgrid.y + 1) * f32(size)) + offset.y, size, color)
 }
 
-hover_tilegrid :: proc() {
-  size: i32 = 20
+hover_tilegrid :: proc(tileGrid: ^TileGrid) {
+  size: i32 = tileGrid.hexagon_size
 
   half_length := f32(size) * math.sqrt_f32(3) / 3
   half_size := f32(size) / 2
 
-  pos := rl.GetMousePosition()
+  pos := rl.GetMousePosition() - la.Vector2f32{f32(tileGrid.offset.x), f32(tileGrid.offset.y)}
   halfgrid := get_halfgrid_pos(pos, size)
 
-  if (within_halfgrid_range(8, {10, 10}, {i8(halfgrid.x), i8(halfgrid.y)})) {
-    fill_hexagon_halfgrid(halfgrid, rl.BLUE)
+  if (within_halfgrid_range(tileGrid.size, {i8(halfgrid.x), i8(halfgrid.y)})) {
+    fill_hexagon_halfgrid(halfgrid, tileGrid.offset, rl.BLUE)
   } else {
-    //outline_hexagon_halfgrid(halfgrid, rl.BLACK)
+    outline_hexagon_halfgrid(halfgrid, tileGrid.offset, rl.RED)
   }
 }
 
-within_halfgrid_range :: proc(size: i8, shift: [2]i8, posi: [2]i8) -> bool {
-  pos := posi - shift
-
+within_halfgrid_range :: proc(size: i8, pos: [2]i8) -> bool {
   return abs(pos.x) + size/2 < size && abs(pos.y) < size && abs(pos.x) + abs(pos.y) < size;
 }
 
-main :: proc() {
-  rl.InitWindow(800, 600, "hexabomb")
+Game :: struct {
+  currentPlayerIndex: i32,
+  players: [2]Player,
+  tileGrid: TileGrid,
+  screenSize: [2]i32,
+}
 
-  tileGrid: TileGrid = {
+Player :: struct {
+  color: rl.Color,
+}
+
+init_game :: proc(game: ^Game) {
+  game.currentPlayerIndex = 0
+  game.players = {
+    Player {
+      color = rl.BLUE,
+    },
+    Player {
+      color = rl.RED,
+    }
+  }
+  game.screenSize = {400, 300}
+
+  game.tileGrid = TileGrid {
     tiles = {},
     size = 8,
+    hexagon_size = 20
   }
+  
+  half_length := i32(f32(game.tileGrid.hexagon_size) * math.sqrt_f32(3) / 3)
+  size := game.tileGrid.hexagon_size
+
+  game.tileGrid.offset = {game.screenSize.x / 2 - half_length, game.screenSize.y / 2 - size}
+}
+
+update_game :: proc(game: ^Game, dt: f32) {
+    render_tilegrid(&game.tileGrid)
+    hover_tilegrid(&game.tileGrid)
+}
+
+main :: proc() {
+  game: Game
+  init_game(&game)
+  
+  rl.InitWindow(game.screenSize.x, game.screenSize.y, "hexabomb")
 
   for !rl.WindowShouldClose() {
     rl.BeginDrawing()
     rl.ClearBackground(rl.WHITE)
 
-    render_tilegrid(&tileGrid, {10, 10})
-    hover_tilegrid()
+    update_game(&game, rl.GetFrameTime())
 
     rl.EndDrawing()
   }
