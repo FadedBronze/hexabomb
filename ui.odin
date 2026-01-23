@@ -1,0 +1,128 @@
+package main
+
+import rl "vendor:raylib"
+import rn "base:runtime"
+import la "core:math/linalg"
+
+BUTTON_FONT_SIZE :: 22
+
+UI :: struct {
+  nextFreeId: u32,
+  activeId: rn.Source_Code_Location,
+  buttons_length: u16,
+  button_offset: u32,
+  active_layout: Layout,
+}
+
+RowDirection :: enum {
+  Up,
+  Down,
+  Left,
+  Right,
+}
+
+EmptyLayout :: struct {}
+
+Layout :: union {
+  RowLayout,
+  EmptyLayout
+}
+
+RowLayout :: struct {
+  direction: RowDirection,
+  x_offset: f32,
+  y_offset: f32,
+  gap: f32,
+}
+
+row_layout :: proc(ui: ^UI, direction: RowDirection, offset: la.Vector2f32, gap: f32) {
+  ui.active_layout = RowLayout{
+    direction = direction,
+    x_offset = offset.x,
+    y_offset = offset.y,
+    gap = gap,
+  }
+}
+
+row_layout_end :: proc(ui: ^UI) {
+  ui.active_layout = EmptyLayout{}
+}
+
+within_rectangle :: proc(rect: rl.Rectangle, pos: la.Vector2f32) -> bool {
+  return pos.x < rect.x + rect.width && pos.x > rect.x && pos.y < rect.y + rect.height && pos.y > rect.y
+}
+
+
+update_layout :: proc(ui: ^UI, rectangle: ^rl.Rectangle) {
+  #partial switch &layout in &ui.active_layout {
+  case RowLayout: 
+    rectangle.x = layout.x_offset
+    rectangle.y = layout.y_offset
+
+    if layout.direction == .Left {
+      rectangle.x -= rectangle.width
+    } else if layout.direction == .Up {
+      rectangle.y -= rectangle.height
+    }
+
+    switch layout.direction {
+    case .Up:
+      layout.y_offset += rectangle.height + layout.gap
+    case .Down:
+      layout.y_offset -= rectangle.height + layout.gap
+    case .Left:
+      layout.x_offset -= rectangle.width + layout.gap
+    case .Right:
+      layout.x_offset += rectangle.width + layout.gap
+    }
+  }
+}
+
+button :: proc(ui: ^UI, rectangle: rl.Rectangle, text: cstring, id := #caller_location) -> bool {
+  rectangle := rectangle
+
+  update_layout(ui, &rectangle)
+
+  rl.DrawRectangleRec(rectangle, rl.Color { 200, 200, 200, 255 })
+  within_button := within_rectangle(rectangle, rl.GetMousePosition())
+  mouse_down := rl.IsMouseButtonDown(.LEFT)
+
+  if within_button {
+    ui.activeId = id
+
+    if mouse_down {
+      rl.DrawRectangleRec(rectangle, rl.Color { 220, 220, 220, 255 })
+    }
+  }
+
+  if !within_button && id == ui.activeId {
+    ui.activeId = rn.Source_Code_Location{}
+  }
+
+  pressed := false
+
+  if id == ui.activeId {
+    rl.DrawRectangleLines(i32(rectangle.x), i32(rectangle.y), i32(rectangle.width), i32(rectangle.height), rl.BLACK)
+    pressed = rl.IsMouseButtonPressed(.LEFT)
+  }
+
+  text_width := rl.MeasureText(text, BUTTON_FONT_SIZE)
+
+  rl.DrawText(text, i32(rectangle.x + rectangle.width/2) - i32(text_width)/2, i32(rectangle.y + rectangle.height/2) - BUTTON_FONT_SIZE/2, BUTTON_FONT_SIZE, rl.Color { 0, 0, 0, 255 })
+
+  return pressed
+}
+
+text_display :: proc(ui: ^UI, rectangle: rl.Rectangle, text: cstring, color: rl.Color, id := #caller_location) {
+  rectangle := rectangle
+
+  update_layout(ui, &rectangle)
+
+  text_width := rl.MeasureText(text, BUTTON_FONT_SIZE)
+
+  rl.DrawText(text, i32(rectangle.x + rectangle.width/2) - i32(text_width)/2, i32(rectangle.y + rectangle.height/2) - BUTTON_FONT_SIZE/2, BUTTON_FONT_SIZE, color)
+}
+
+empty_id :: proc() -> rn.Source_Code_Location {
+  return rn.Source_Code_Location{}
+}

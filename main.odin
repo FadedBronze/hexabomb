@@ -39,7 +39,7 @@ TileType :: enum {
   Blocked,
   Free,
   Land,
-  Canon,
+  Cannon,
   Shield,
   BlastTarget,
 }
@@ -58,15 +58,12 @@ Tile :: struct {
   tileData: TileData,
 }
 
-NotSpecial :: struct {}
-
-Canon :: struct {
+Cannon :: struct {
   direction: HexDirection,
-  ui_id: u32,
 }
 
 TileData :: union {
-  Canon,
+  Cannon,
 }
 
 TileGrid :: struct {
@@ -74,7 +71,7 @@ TileGrid :: struct {
   hexagonSize: i32,
   offset: [2]i32,
   size: i16,
-  placeTilesId: u32,
+  uiIds: u32,
 }
 
 // -------------------------------------- HALFGRID ------------------------------------ //
@@ -207,7 +204,6 @@ Game :: struct {
   players: [4]Player,
   playerCount: u32,
   tileGrid: TileGrid,
-  screenSize: [2]i32,
   ui: UI,
 }
 
@@ -216,18 +212,15 @@ get_tile :: proc(tileGrid: ^TileGrid, pos: HalfGridPosition) -> ^Tile {
   return &tileGrid.tiles[idx]
 }
 
-init_tilegrid :: proc(tileGrid: ^TileGrid, ui: ^UI, screenSize: [2]i32) {
+init_tilegrid :: proc(tileGrid: ^TileGrid, ui: ^UI) {
   hexagonSize: i32 = 30
-
-  tileGrid.placeTilesId = reserve_ids(ui, 10)
-
-  half_length := i32(f32(hexagonSize) * math.sqrt_f32(3) / 3)
 
   tileGrid^ = TileGrid {
     size = 8,
     hexagonSize = hexagonSize,
-    offset = {screenSize.x / 2 - half_length, screenSize.y / 2 - hexagonSize}
   }
+
+  update_tilegrid_offset(tileGrid)
   
   get_tile(tileGrid, {3, 3})^ = Tile {
     playerIndex = 0,
@@ -242,72 +235,96 @@ init_tilegrid :: proc(tileGrid: ^TileGrid, ui: ^UI, screenSize: [2]i32) {
   }
 }
 
+update_tilegrid_offset :: proc(tileGrid: ^TileGrid) {
+  half_length := i32(f32(tileGrid.hexagonSize) * math.sqrt_f32(3) / 3)
+  tileGrid.offset = {rl.GetScreenWidth() / 2 - half_length, rl.GetScreenHeight() / 2 - tileGrid.hexagonSize}
+}
+
 init_game :: proc(game: ^Game) {
   game^ = Game {
     currentPlayerIndex = 0,
     playerCount = 2,
-    screenSize = {800, 600}
   }
 
   game.players[0] = Player {
     color = rl.BLUE,
+    username = "Blue",
     selectedTileType = .Land,
   }
 
   game.players[1] = Player {
     color = rl.RED,
+    username = "Red",
     selectedTileType = .Land,
   }
 
-  init_tilegrid(&game.tileGrid, &game.ui, game.screenSize)
+  init_tilegrid(&game.tileGrid, &game.ui)
 
-  start_turn(game)
+  start_next_turn(game)
 }
 
 update_game :: proc(game: ^Game, dt: f32) {
     player := &game.players[game.currentPlayerIndex]
 
+    switch player.editMode {
+      case .Placing:
+        place_tile(game)
+      case .Clicking:
+        click_tile(game)
+    }
+        
+    update_tilegrid_offset(&game.tileGrid)
     render_gameboard(game)
-    hover_tilegrid(&game.tileGrid, player)
+    hover_tilegrid(&game.tileGrid, player, &game.ui)
+}
 
-    if rl.IsKeyPressed(.ONE) {
-      player.selectedTileType = .Land
-    }
-    
-    if rl.IsKeyPressed(.TWO) {
-      player.selectedTileType = .Canon
-    }
-    
-    if rl.IsKeyPressed(.THREE) {
-      player.selectedTileType = .Shield
-    }
-    
-    if rl.IsKeyPressed(.FOUR) {
-      player.selectedTileType = .BlastTarget
-    }
+click_tile :: proc(game: ^Game) {
+    halfgrid := get_tile_grid_pos(&game.tileGrid, rl.GetMousePosition())
+    hovered_tile := get_tile(&game.tileGrid, halfgrid)
 
-    if rl.IsKeyPressed(.N) {
-      start_turn(game)
+    if rl.IsMouseButtonPressed(.LEFT) {
+      if hovered_tile.type == .Cannon {
+        fmt.println("cannon")
+      } else {
+        fmt.println("lame")
+      }
     }
+}
 
-    place_tile(game)
+EditMode :: enum {
+  Placing,
+  Clicking,
 }
 
 Player :: struct {
   color: rl.Color,
   selectedTileType: TileType,
+  editMode: EditMode,
   energy: u16,
+  username: cstring,
 }
 
-hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player) {
+hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player, ui: ^UI, id := #caller_location) {
+  if ui.activeId == empty_id() {
+    ui.activeId = id
+  }
+  if ui.activeId != id {
+    return
+  }
+
   halfgrid := get_tile_grid_pos(tileGrid, rl.GetMousePosition())
+
+  if player.editMode == .Clicking {
+      fill_hexagon_halfgrid(halfgrid, tileGrid.offset, rl.Color{255, 255, 255, 50}, tileGrid.hexagonSize)
+      return;
+  }
 
   if (within_halfgrid_range(tileGrid.size, {i16(halfgrid.x), i16(halfgrid.y)})) {
     if player.selectedTileType == .Land {
       fill_hexagon_halfgrid(halfgrid, tileGrid.offset, player.color, tileGrid.hexagonSize)
     }
 
-    if player.selectedTileType == .Canon {
+    if player.selectedTileType == .Cannon {
       spos := get_screen_position(tileGrid, halfgrid)
       rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
     }
@@ -368,7 +385,7 @@ render_gameboard :: proc(game: ^Game) {
       }
 
       if (game.currentPlayerIndex == tile.playerIndex) {
-        if tile.type == .Canon {
+        if tile.type == .Cannon {
           spos := get_screen_position(&game.tileGrid, pos)
           rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
         }
@@ -401,7 +418,7 @@ place_tile :: proc(game: ^Game) {
     player := &game.players[game.currentPlayerIndex]
 
     if player.selectedTileType == .BlastTarget {
-      return tile.playerIndex == game.currentPlayerIndex && tile.type == .Canon
+      return tile.playerIndex == game.currentPlayerIndex && tile.type == .Cannon
     } 
 
     if player.selectedTileType == .Land {
@@ -433,7 +450,7 @@ place_tile :: proc(game: ^Game) {
   tile.type = player.selectedTileType
 }
 
-start_turn :: proc (game: ^Game) {
+start_next_turn :: proc (game: ^Game) {
   game.currentPlayerIndex += 1
   game.currentPlayerIndex %= game.playerCount
 
@@ -444,28 +461,66 @@ start_turn :: proc (game: ^Game) {
 end_turn :: proc (game: ^Game) {
 }
 
-UI :: struct {
-  nextFreeId: u32,
-  activeId: u32,
-}
+ui_layout :: proc(game: ^Game) {
+  ui := &game.ui
+  // ui buttonstrip
+  row_layout(ui, .Right, {10, 10}, 10)
 
-reserve_ids :: proc(ui: ^UI, count: u32) -> u32 {
-  nextFreeId := ui.nextFreeId
-  ui.nextFreeId += count
-  return nextFreeId
+  if (button(ui, rl.Rectangle {
+    width = 100,
+    height = 75,
+  }, "cannon")) {
+    game.players[game.currentPlayerIndex].selectedTileType = .Cannon
+  }
+  
+  if (button(ui, rl.Rectangle {
+    width = 100,
+    height = 75,
+  }, "land")) {
+    game.players[game.currentPlayerIndex].selectedTileType = .Land
+  }
+  
+  if (button(ui, rl.Rectangle {
+    width = 100,
+    height = 75,
+  }, "shield")) {
+    game.players[game.currentPlayerIndex].selectedTileType = .Shield
+  }
+
+  row_layout_end(ui)
+  
+  row_layout(ui, .Left, {f32(rl.GetScreenWidth()-10), f32(rl.GetScreenHeight()-10) - 75}, 10)
+  
+  if (button(ui, rl.Rectangle {
+    width = 150,
+    height = 75,
+  }, "end turn")) {
+    start_next_turn(game)
+  }
+
+  player := &game.players[game.currentPlayerIndex]
+  
+  text_display(ui, rl.Rectangle {
+    width = 100,
+    height = 75,
+  }, player.username, player.color)
+
+  row_layout_end(ui)
 }
 
 main :: proc() {
   game: Game
   init_game(&game)
   
-  rl.InitWindow(game.screenSize.x, game.screenSize.y, "hexabomb")
+  rl.InitWindow(400, 400, "hexabomb")
+  rl.SetWindowState({.WINDOW_RESIZABLE})
 
   for !rl.WindowShouldClose() {
     rl.BeginDrawing()
     rl.ClearBackground(rl.WHITE)
 
     update_game(&game, rl.GetFrameTime())
+    ui_layout(&game)
 
     rl.EndDrawing()
   }
