@@ -465,26 +465,28 @@ ui_layout :: proc(game: ^Game) {
   ui := &game.ui
   // ui buttonstrip
   row_layout(ui, .Right, {10, 10}, 10)
+  
+  player := &game.players[game.currentPlayerIndex]
 
   if (button(ui, rl.Rectangle {
     width = 100,
     height = 75,
-  }, "cannon")) {
-    game.players[game.currentPlayerIndex].selectedTileType = .Cannon
+  }, "cannon", player.color)) {
+    player.selectedTileType = .Cannon
   }
   
   if (button(ui, rl.Rectangle {
     width = 100,
     height = 75,
-  }, "land")) {
-    game.players[game.currentPlayerIndex].selectedTileType = .Land
+  }, "land", player.color)) {
+    player.selectedTileType = .Land
   }
   
   if (button(ui, rl.Rectangle {
     width = 100,
     height = 75,
-  }, "shield")) {
-    game.players[game.currentPlayerIndex].selectedTileType = .Shield
+  }, "shield", player.color)) {
+    player.selectedTileType = .Shield
   }
 
   row_layout_end(ui)
@@ -494,12 +496,10 @@ ui_layout :: proc(game: ^Game) {
   if (button(ui, rl.Rectangle {
     width = 150,
     height = 75,
-  }, "end turn")) {
+  }, "end turn", player.color)) {
     start_next_turn(game)
   }
-
-  player := &game.players[game.currentPlayerIndex]
-  
+ 
   text_display(ui, rl.Rectangle {
     width = 100,
     height = 75,
@@ -512,7 +512,7 @@ main :: proc() {
   game: Game
   init_game(&game)
   
-  rl.InitWindow(400, 400, "hexabomb")
+  rl.InitWindow(800, 800, "hexabomb")
   rl.SetWindowState({.WINDOW_RESIZABLE})
 
   for !rl.WindowShouldClose() {

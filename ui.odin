@@ -78,12 +78,15 @@ update_layout :: proc(ui: ^UI, rectangle: ^rl.Rectangle) {
   }
 }
 
-button :: proc(ui: ^UI, rectangle: rl.Rectangle, text: cstring, id := #caller_location) -> bool {
+button :: proc(ui: ^UI, rectangle: rl.Rectangle, text: cstring, color: rl.Color, id := #caller_location) -> bool {
   rectangle := rectangle
 
   update_layout(ui, &rectangle)
 
-  rl.DrawRectangleRec(rectangle, rl.Color { 200, 200, 200, 255 })
+  col := color / rl.Color { 2, 2, 2, 1 } + rl.Color{255, 255, 255, 0} / 2
+  col2 := color / rl.Color { 3, 3, 3, 1 } + rl.Color{255, 255, 255, 0} / 3 * 2
+
+  rl.DrawRectangleRec(rectangle, col)
   within_button := within_rectangle(rectangle, rl.GetMousePosition())
   mouse_down := rl.IsMouseButtonDown(.LEFT)
 
@@ -91,7 +94,7 @@ button :: proc(ui: ^UI, rectangle: rl.Rectangle, text: cstring, id := #caller_lo
     ui.activeId = id
 
     if mouse_down {
-      rl.DrawRectangleRec(rectangle, rl.Color { 220, 220, 220, 255 })
+      rl.DrawRectangleRec(rectangle, col2)
     }
   }
 
@@ -108,7 +111,7 @@ button :: proc(ui: ^UI, rectangle: rl.Rectangle, text: cstring, id := #caller_lo
 
   text_width := rl.MeasureText(text, BUTTON_FONT_SIZE)
 
-  rl.DrawText(text, i32(rectangle.x + rectangle.width/2) - i32(text_width)/2, i32(rectangle.y + rectangle.height/2) - BUTTON_FONT_SIZE/2, BUTTON_FONT_SIZE, rl.Color { 0, 0, 0, 255 })
+  rl.DrawText(text, i32(rectangle.x + rectangle.width/2) - i32(text_width)/2, i32(rectangle.y + rectangle.height/2) - BUTTON_FONT_SIZE/2, BUTTON_FONT_SIZE, rl.BLACK)
 
   return pressed
 }
