@@ -36,8 +36,8 @@ HexDirection :: enum {
 }
 
 TileType :: enum {
-  Blocked,
   Free,
+  Blocked,
   Land,
   Cannon,
   Shield,
@@ -114,7 +114,7 @@ get_halfgrid_pos :: proc(pos: la.Vector2f32, size: i32) -> la.Vector2f32 {
 }
 
 get_tile_grid_pos :: proc(tileGrid: ^TileGrid, position: la.Vector2f32) -> HalfGridPosition {
-  grid_pos := get_halfgrid_pos(rl.GetMousePosition() - la.Vector2f32{f32(tileGrid.offset.x), f32(tileGrid.offset.y)}, tileGrid.hexagonSize)
+  grid_pos := get_halfgrid_pos(position - la.Vector2f32{f32(tileGrid.offset.x), f32(tileGrid.offset.y)}, tileGrid.hexagonSize)
   return { i16(grid_pos.x), i16(grid_pos.y) }
 }
 
@@ -194,18 +194,31 @@ MAX_SHOTS :: 16
 
 Shot :: struct {
   playerIndex: u32,
-  cannonPos: HalfGridPosition,
-  targetDir: HexDirection,
+  position: la.Vector2f32,
+  velocity: la.Vector2f32,
+  pos: HalfGridPosition,
+  exploded: bool,
+}
+
+GameState :: enum {
+  Playing,
+  BetweenRounds,
+  Simulate,
+  Paused,
 }
 
 Game :: struct {
-  shots: [MAX_SHOTS]Shot,
-  shot_count: u32,
+  state: GameState,
   currentPlayerIndex: u32,
   players: [4]Player,
   playerCount: u32,
   tileGrid: TileGrid,
   ui: UI,
+
+  shots: [MAX_SHOTS]Shot,
+  shot_count: u32,
+  exploded_count: u32,
+  simulationTime: f32,
 }
 
 get_tile :: proc(tileGrid: ^TileGrid, pos: HalfGridPosition) -> ^Tile {
@@ -244,7 +257,7 @@ update_tilegrid_offset :: proc(tileGrid: ^TileGrid) {
 
 init_game :: proc(game: ^Game) {
   game^ = Game {
-    currentPlayerIndex = 0,
+    currentPlayerIndex = 1,
     playerCount = 2,
   }
 
@@ -269,22 +282,6 @@ init_game :: proc(game: ^Game) {
   init_tilegrid(&game.tileGrid, &game.ui)
 
   start_next_turn(game)
-}
-
-update_game :: proc(game: ^Game, dt: f32) {
-    player := &game.players[game.currentPlayerIndex]
- 
-    update_tilegrid_offset(&game.tileGrid)
-    render_gameboard(game)
-    
-    switch player.editMode {
-      case .Placing:
-        place_tile(game)
-      case .Clicking:
-        click_tile(game)
-    }
-
-    hover_tilegrid(&game.tileGrid, player, &game.ui)
 }
 
 get_tile_id :: proc(pos: HalfGridPosition) -> u32 {
@@ -354,9 +351,9 @@ click_tile :: proc(game: ^Game) {
   player := &game.players[game.currentPlayerIndex]
 
   if rl.IsMouseButtonPressed(.LEFT) {
-    fmt.println(hovered_tile)
+    //fmt.println(hovered_tile)
 
-    if hovered_tile.type == .Cannon {
+    if hovered_tile.type == .Cannon && hovered_tile.playerIndex == game.currentPlayerIndex {
       game.tileGrid.activeTileId = get_tile_id(halfgrid)
       
       player.editMode = .Placing
@@ -424,7 +421,7 @@ render_gameboard :: proc(game: ^Game) {
     if tile.type != .Free && tile.type != .Blocked && tile.type != .BlastTarget {
       fill_hexagon_halfgrid(pos, tileGrid.offset, player.color, tileGrid.hexagonSize)
 
-      if (game.currentPlayerIndex == tile.playerIndex) {
+      if (game.currentPlayerIndex == tile.playerIndex && game.state != .BetweenRounds) {
         if tile.type == .Cannon {
           spos := get_screen_position(&game.tileGrid, pos)
           rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
@@ -436,6 +433,10 @@ render_gameboard :: proc(game: ^Game) {
         }
 
       }
+    }
+
+    if game.state == .BetweenRounds {
+      continue
     }
 
     for shotId in tile.shotIds {
@@ -474,10 +475,19 @@ place_tile :: proc(game: ^Game) {
   if player.selectedTileType == .BlastTarget && hit {
     append_shotId(tile, game.shot_count+1)
 
+    dir_offset := directions[dir]
+  
+    speed :: 4
+
+    pos := get_screen_position(&game.tileGrid, cannonHalfgridPos)
+    fwd_pos := get_screen_position(&game.tileGrid, cannonHalfgridPos - directions[dir])
+    vel := (fwd_pos - pos)
+
     game.shots[game.shot_count] = Shot {
-      cannonPos = cannonHalfgridPos,
       playerIndex = game.currentPlayerIndex,
-      targetDir = dir,
+      velocity = vel * speed,
+      pos = cannonHalfgridPos + directions[dir],
+      position = pos
     }
 
     game.tileGrid.activeTileId = 0
@@ -519,16 +529,11 @@ start_next_turn :: proc (game: ^Game) {
 
   if game.currentPlayerIndex == game.playerCount {
     game.currentPlayerIndex = 0
-
-    end_turn(game)
+    game.state = .BetweenRounds
   }
 
   player := &game.players[game.currentPlayerIndex]
   player.energy = 3
-}
-
-end_turn :: proc (game: ^Game) {
-
 }
 
 ui_layout :: proc(game: ^Game) {
@@ -588,6 +593,126 @@ ui_layout :: proc(game: ^Game) {
   row_layout_end(ui)
 }
 
+apply_friction :: proc(v: ^la.Vector2f32, f: f32) {
+  if v.x > 0 {
+    v.x -= f
+  } else {
+    v.x += f
+  }
+
+  if v.y > 0 {
+    v.y += f
+  } else {
+    v.y += f
+  }
+
+  if abs(v.y) <= f {
+    v.y = 0
+  }
+  
+  if abs(v.x) <= f {
+    v.x = 0
+  }
+}
+
+simulate :: proc(game: ^Game, dt: f32) {
+  game.simulationTime += dt
+
+  friction :: 0.01 // tiles/second^2
+  size :: 24
+
+  if game.exploded_count == game.shot_count {
+    fmt.println(game.exploded_count, game.shot_count)
+
+    game.shot_count = 0
+    game.exploded_count = 0
+    game.state = .Playing
+  }
+
+  for i in 0..<game.shot_count {
+    shot := &game.shots[i]
+
+    if shot.exploded {
+      continue
+    }
+
+    shot.position += shot.velocity * dt
+    shot.velocity += math.sign(shot.velocity.x/shot.velocity.y) * friction * dt
+
+    apply_friction(&shot.velocity, friction * dt)
+
+    halfgridPos := get_tile_grid_pos(&game.tileGrid, shot.position)
+    tile := get_tile(&game.tileGrid, halfgridPos)
+
+    fmt.println(halfgridPos, shot.position, shot.pos)
+
+    if tile.type == .Land || tile.type == .Shield || !within_halfgrid_range(game.tileGrid.size, halfgridPos) {
+      fmt.println(tile)
+
+      shot.exploded = true;
+      game.exploded_count += 1;
+      
+      origin_tile := get_tile(&game.tileGrid, shot.pos)
+
+      fmt.println(origin_tile)
+
+      origin_tile.shotIds = {}
+
+      tile^ = {}
+    }
+
+    rl.DrawCircle(i32(shot.position.x), i32(shot.position.y), size, rl.BLACK)
+  }
+}
+
+update_game :: proc(game: ^Game, dt: f32) {
+    player := &game.players[game.currentPlayerIndex]
+ 
+    update_tilegrid_offset(&game.tileGrid)
+    render_gameboard(game)
+
+    switch game.state {
+      case .Paused:
+        play := button(&game.ui, rl.Rectangle{
+          x = f32(rl.GetScreenWidth())/2 - 75,
+          y = f32(rl.GetScreenHeight())/2 - 75,
+          width = 150,
+          height = 150,
+        }, "play", rl.GRAY)
+
+        if rl.IsKeyPressed(.P) || play {
+          game.state = .Playing
+        }
+      case .BetweenRounds:
+        start := button(&game.ui, rl.Rectangle{
+          x = f32(rl.GetScreenWidth())/2 - 75,
+          y = f32(rl.GetScreenHeight())/2 - 75,
+          width = 150,
+          height = 150,
+        }, "start", rl.GRAY)
+
+        if start {
+          game.state = .Simulate
+        }
+      case .Simulate:
+        simulate(game, dt)
+      case .Playing:
+        if rl.IsKeyPressed(.P) {
+          game.state = .Paused
+        }
+
+        switch player.editMode {
+          case .Placing:
+            place_tile(game)
+          case .Clicking:
+            click_tile(game)
+        }    
+
+        ui_layout(game)
+        hover_tilegrid(&game.tileGrid, player, &game.ui)
+    }    
+}
+
 main :: proc() {
   game: Game
   init_game(&game)
@@ -600,7 +725,6 @@ main :: proc() {
     rl.ClearBackground(rl.WHITE)
 
     update_game(&game, rl.GetFrameTime())
-    ui_layout(&game)
 
     rl.EndDrawing()
   }
