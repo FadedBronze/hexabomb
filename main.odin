@@ -54,24 +54,20 @@ HalfGridPosition :: [2]i16
 Tile :: struct {
   playerIndex: u32,
   visibility: Visibility,
+  target: bool,
   type: TileType,
-  tileData: TileData,
 }
 
 Cannon :: struct {
   direction: HexDirection,
 }
 
-TileData :: union {
-  Cannon,
-}
-
 TileGrid :: struct {
+  activeTileId: u32,
   tiles: [MAX_GRID_SIZE * MAX_GRID_SIZE]Tile,
   hexagonSize: i32,
   offset: [2]i32,
   size: i16,
-  uiIds: u32,
 }
 
 // -------------------------------------- HALFGRID ------------------------------------ //
@@ -218,6 +214,7 @@ init_tilegrid :: proc(tileGrid: ^TileGrid, ui: ^UI) {
   tileGrid^ = TileGrid {
     size = 8,
     hexagonSize = hexagonSize,
+    activeTileId = 0,
   }
 
   update_tilegrid_offset(tileGrid)
@@ -265,46 +262,42 @@ init_game :: proc(game: ^Game) {
 
 update_game :: proc(game: ^Game, dt: f32) {
     player := &game.players[game.currentPlayerIndex]
-
+ 
+    update_tilegrid_offset(&game.tileGrid)
+    render_gameboard(game)
+    
     switch player.editMode {
       case .Placing:
         place_tile(game)
       case .Clicking:
         click_tile(game)
     }
-        
-    update_tilegrid_offset(&game.tileGrid)
-    render_gameboard(game)
+
     hover_tilegrid(&game.tileGrid, player, &game.ui)
 }
 
-click_tile :: proc(game: ^Game) {
-    halfgrid := get_tile_grid_pos(&game.tileGrid, rl.GetMousePosition())
-    hovered_tile := get_tile(&game.tileGrid, halfgrid)
-
-    if rl.IsMouseButtonPressed(.LEFT) {
-      if hovered_tile.type == .Cannon {
-        fmt.println("cannon")
-      } else {
-        fmt.println("lame")
-      }
-    }
+get_tile_id :: proc(pos: HalfGridPosition) -> u32 {
+  return u32((pos.y + HALF_MAX_GRID_SIZE) * MAX_GRID_SIZE + (pos.x + HALF_MAX_GRID_SIZE)) + 1
 }
 
-EditMode :: enum {
-  Placing,
-  Clicking,
-}
+get_active_tile :: proc(tilegrid: ^TileGrid) -> (^Tile, HalfGridPosition) {
+  if tilegrid.activeTileId == 0 {
+    return nil, {}
+  }
+  idx := tilegrid.activeTileId-1
 
-Player :: struct {
-  color: rl.Color,
-  selectedTileType: TileType,
-  editMode: EditMode,
-  energy: u16,
-  username: cstring,
+  fmt.println(idx)
+
+  x := idx % MAX_GRID_SIZE
+  y := idx / MAX_GRID_SIZE
+
+  return &tilegrid.tiles[idx], HalfGridPosition{i16(x)-HALF_MAX_GRID_SIZE, i16(y)-HALF_MAX_GRID_SIZE}
 }
 
 hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player, ui: ^UI, id := #caller_location) {
+  if tileGrid.activeTileId != 0 {
+    return
+  }
   if ui.activeId == empty_id() {
     ui.activeId = id
   }
@@ -320,29 +313,64 @@ hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player, ui: ^UI, id := #cal
   }
 
   if (within_halfgrid_range(tileGrid.size, {i16(halfgrid.x), i16(halfgrid.y)})) {
-    if player.selectedTileType == .Land {
-      fill_hexagon_halfgrid(halfgrid, tileGrid.offset, player.color, tileGrid.hexagonSize)
-    }
-
-    if player.selectedTileType == .Cannon {
-      spos := get_screen_position(tileGrid, halfgrid)
-      rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
-    }
-    
-    if player.selectedTileType == .Shield {
-      spos := get_screen_position(tileGrid, halfgrid)
-      fill_hexagon(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
-    }
-    
-    if player.selectedTileType == .BlastTarget {
+    switch player.selectedTileType {
+    case .BlastTarget:
       spos := get_screen_position(tileGrid, halfgrid)
       rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{255, 0, 0, 255})
       rl.DrawCircle(i32(spos.x), i32(spos.y), 10, rl.Color{255, 255, 255, 255})
       rl.DrawCircle(i32(spos.x), i32(spos.y), 5, rl.Color{255, 0, 0, 255})
+    case .Land:
+      fill_hexagon_halfgrid(halfgrid, tileGrid.offset, player.color, tileGrid.hexagonSize)
+    case .Cannon:
+      spos := get_screen_position(tileGrid, halfgrid)
+      rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
+    case .Shield:
+      spos := get_screen_position(tileGrid, halfgrid)
+      fill_hexagon(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
+    case .Free:
+    case .Blocked:
     }
   } else {
     outline_hexagon_halfgrid(halfgrid, tileGrid.offset, rl.RED, tileGrid.hexagonSize)
   }
+}
+
+click_tile :: proc(game: ^Game) {
+  halfgrid := get_tile_grid_pos(&game.tileGrid, rl.GetMousePosition())
+  hovered_tile := get_tile(&game.tileGrid, halfgrid)
+
+  player := &game.players[game.currentPlayerIndex]
+
+  if rl.IsMouseButtonPressed(.LEFT) {
+    if hovered_tile.type == .Cannon {
+      game.tileGrid.activeTileId = get_tile_id(halfgrid)
+      
+      player.editMode = .Placing
+      player.selectedTileType = .BlastTarget
+    }
+  }
+}
+
+EditMode :: enum {
+  Placing,
+  Clicking,
+}
+
+Player :: struct {
+  color: rl.Color,
+  selectedTileType: TileType,
+  editMode: EditMode,
+  energy: u16,
+  username: cstring,
+}
+
+next_to :: proc(a: HalfGridPosition, b: HalfGridPosition) -> bool {
+  for point in directions {
+    if a + point == b {
+      return true
+    }
+  }
+  return false
 }
 
 test_adjacent_cell :: proc(game: ^Game, p: HalfGridPosition, test: proc(game: ^Game, tile: ^Tile) -> bool) -> bool {
@@ -380,9 +408,7 @@ render_gameboard :: proc(game: ^Game) {
     player := &game.players[tile.playerIndex]
 
     if tile.type != .Free && tile.type != .Blocked {
-      if tile.type != .BlastTarget {
-        fill_hexagon_halfgrid(pos, tileGrid.offset, player.color, tileGrid.hexagonSize)
-      }
+      fill_hexagon_halfgrid(pos, tileGrid.offset, player.color, tileGrid.hexagonSize)
 
       if (game.currentPlayerIndex == tile.playerIndex) {
         if tile.type == .Cannon {
@@ -395,13 +421,14 @@ render_gameboard :: proc(game: ^Game) {
           fill_hexagon(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
         }
 
-        if tile.type == .BlastTarget {
-          spos := get_screen_position(&game.tileGrid, pos)
-          rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{255, 0, 0, 255})
-          rl.DrawCircle(i32(spos.x), i32(spos.y), 10, rl.Color{255, 255, 255, 255})
-          rl.DrawCircle(i32(spos.x), i32(spos.y), 5, rl.Color{255, 0, 0, 255})
-        }
       }
+    }
+
+    if tile.target {
+      spos := get_screen_position(&game.tileGrid, pos)
+      rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{255, 0, 0, 125})
+      rl.DrawCircle(i32(spos.x), i32(spos.y), 10, rl.Color{255, 255, 255, 125})
+      rl.DrawCircle(i32(spos.x), i32(spos.y), 5, rl.Color{255, 0, 0, 125})
     }
   }
 }
@@ -409,39 +436,35 @@ render_gameboard :: proc(game: ^Game) {
 place_tile :: proc(game: ^Game) {
   player := &game.players[game.currentPlayerIndex]
   halfgridPos := get_tile_grid_pos(&game.tileGrid, rl.GetMousePosition())
+  tile := get_tile(&game.tileGrid, halfgridPos)
 
   if !rl.IsMouseButtonPressed(.LEFT) {
     return
   }
 
-  test :: proc(game: ^Game, tile: ^Tile) -> bool {
-    player := &game.players[game.currentPlayerIndex]
-
-    if player.selectedTileType == .BlastTarget {
-      return tile.playerIndex == game.currentPlayerIndex && tile.type == .Cannon
-    } 
-
-    if player.selectedTileType == .Land {
-      return tile.playerIndex == game.currentPlayerIndex && tile.type == .Land
+  cannon, cannonHalfgridPos := get_active_tile(&game.tileGrid)
+  
+  if player.selectedTileType == .BlastTarget && next_to(halfgridPos, cannonHalfgridPos) {
+    tile.target = true
+  } else {
+    if player.selectedTileType != .Land && (tile.type != .Land || tile.playerIndex != game.currentPlayerIndex) {
+      return 
     }
 
-    return true
-  }
+    next_to_own_territory :: proc(game: ^Game, tile: ^Tile) -> bool {
+      player := &game.players[game.currentPlayerIndex]
+      return tile.playerIndex == game.currentPlayerIndex
+    }
 
-  if !test_adjacent_cell(game, halfgridPos, test) {
-    return
+    if !test_adjacent_cell(game, halfgridPos, next_to_own_territory) {
+      return
+    }
   }
   
   req_energy := tileTypeCost[player.selectedTileType]
 
   if req_energy > player.energy {
     return
-  }
-
-  tile := get_tile(&game.tileGrid, halfgridPos)
-
-  if player.selectedTileType != .BlastTarget && player.selectedTileType != .Land && (tile.type != .Land || tile.playerIndex != game.currentPlayerIndex) {
-    return 
   }
 
   player.energy -= req_energy
@@ -473,6 +496,7 @@ ui_layout :: proc(game: ^Game) {
     height = 75,
   }, "cannon", player.color)) {
     player.selectedTileType = .Cannon
+    player.editMode = .Placing
   }
   
   if (button(ui, rl.Rectangle {
@@ -480,6 +504,7 @@ ui_layout :: proc(game: ^Game) {
     height = 75,
   }, "land", player.color)) {
     player.selectedTileType = .Land
+    player.editMode = .Placing
   }
   
   if (button(ui, rl.Rectangle {
@@ -487,6 +512,14 @@ ui_layout :: proc(game: ^Game) {
     height = 75,
   }, "shield", player.color)) {
     player.selectedTileType = .Shield
+    player.editMode = .Placing
+  }
+
+  if (button(ui, rl.Rectangle {
+    width = 100,
+    height = 75,
+  }, "click", player.color)) {
+    player.editMode = .Clicking
   }
 
   row_layout_end(ui)
