@@ -4,6 +4,7 @@ import "core:fmt"
 import rl "vendor:raylib"
 import "core:math"
 import la "core:math/linalg"
+import "core:math/rand"
 
 MAX_GRID_SIZE :: 32 
 HALF_MAX_GRID_SIZE :: MAX_GRID_SIZE / 2
@@ -42,6 +43,7 @@ TileType :: enum {
   Cannon,
   Shield,
   BlastTarget,
+  Nuke,
 }
 
 Visibility :: enum {
@@ -56,6 +58,7 @@ Tile :: struct {
   visibility: Visibility,
   shotIds: [4]u32, 
   type: TileType,
+  durability: u8,
 }
 
 Cannon :: struct {
@@ -204,6 +207,7 @@ GameState :: enum {
   Playing,
   BetweenRounds,
   Simulate,
+  PostSimulate,
   Paused,
 }
 
@@ -293,8 +297,6 @@ get_active_tile :: proc(tilegrid: ^TileGrid) -> (^Tile, HalfGridPosition) {
     return nil, {}
   }
   idx := tilegrid.activeTileId-1
-
-  fmt.println(idx)
 
   x := idx % MAX_GRID_SIZE
   y := idx / MAX_GRID_SIZE
@@ -421,7 +423,7 @@ render_gameboard :: proc(game: ^Game) {
     if tile.type != .Free && tile.type != .Blocked && tile.type != .BlastTarget {
       fill_hexagon_halfgrid(pos, tileGrid.offset, player.color, tileGrid.hexagonSize)
 
-      if (game.currentPlayerIndex == tile.playerIndex && game.state != .BetweenRounds) {
+      if (game.currentPlayerIndex == tile.playerIndex && game.state == .Playing) {
         if tile.type == .Cannon {
           spos := get_screen_position(&game.tileGrid, pos)
           rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
@@ -435,7 +437,7 @@ render_gameboard :: proc(game: ^Game) {
       }
     }
 
-    if game.state == .BetweenRounds {
+    if game.state != .Playing {
       continue
     }
 
@@ -486,8 +488,8 @@ place_tile :: proc(game: ^Game) {
     game.shots[game.shot_count] = Shot {
       playerIndex = game.currentPlayerIndex,
       velocity = vel * speed,
-      pos = cannonHalfgridPos + directions[dir],
-      position = pos
+      pos = halfgridPos,
+      position = fwd_pos + (pos - fwd_pos) * 0.25
     }
 
     game.tileGrid.activeTileId = 0
@@ -521,6 +523,10 @@ place_tile :: proc(game: ^Game) {
   if player.selectedTileType != .BlastTarget {
     tile.playerIndex = game.currentPlayerIndex
     tile.type = player.selectedTileType
+  }
+
+  if player.selectedTileType == .Shield {
+    tile.durability = 2
   }
 }
 
@@ -564,6 +570,14 @@ ui_layout :: proc(game: ^Game) {
     height = 75,
   }, "shield", player.color)) {
     player.selectedTileType = .Shield
+    player.editMode = .Placing
+  }
+  
+  if (button(ui, rl.Rectangle {
+    width = 100,
+    height = 75,
+  }, "nuke", player.color)) {
+    player.selectedTileType = .Nuke
     player.editMode = .Placing
   }
 
@@ -622,11 +636,9 @@ simulate :: proc(game: ^Game, dt: f32) {
   size :: 24
 
   if game.exploded_count == game.shot_count {
-    fmt.println(game.exploded_count, game.shot_count)
-
     game.shot_count = 0
     game.exploded_count = 0
-    game.state = .Playing
+    game.state = .PostSimulate
   }
 
   for i in 0..<game.shot_count {
@@ -636,6 +648,8 @@ simulate :: proc(game: ^Game, dt: f32) {
       continue
     }
 
+    prevpos := shot.position
+
     shot.position += shot.velocity * dt
     shot.velocity += math.sign(shot.velocity.x/shot.velocity.y) * friction * dt
 
@@ -644,21 +658,59 @@ simulate :: proc(game: ^Game, dt: f32) {
     halfgridPos := get_tile_grid_pos(&game.tileGrid, shot.position)
     tile := get_tile(&game.tileGrid, halfgridPos)
 
-    fmt.println(halfgridPos, shot.position, shot.pos)
+    screenHalfPos := get_screen_position(&game.tileGrid, halfgridPos)
 
-    if tile.type == .Land || tile.type == .Shield || !within_halfgrid_range(game.tileGrid.size, halfgridPos) {
-      fmt.println(tile)
+    //TODO
+    speed :: 4
 
+    if tile.type == .Shield && la.length(prevpos - screenHalfPos) > la.length(shot.position - screenHalfPos) {
+      availableDirs: [6][2]i16
+      availableDirCount: u32 = 0
+
+      for dir in directions {
+        tile := get_tile(&game.tileGrid, halfgridPos + dir)
+        if tile.type == .Free && within_halfgrid_range(game.tileGrid.size, halfgridPos + dir) {
+          availableDirs[availableDirCount] = dir
+          availableDirCount += 1
+        }
+      }
+
+      if availableDirCount == 0 {
+        //TODO NOT SPEGIETTI
+
+        shot.exploded = true;
+        game.exploded_count += 1;
+        
+        origin_tile := get_tile(&game.tileGrid, shot.pos)
+        origin_tile.shotIds = {}
+      
+        tile^ = {}
+      } else {
+        bounce_dir := availableDirs[u32(rand.float32() * f32(availableDirCount))]
+
+        fwd_pos := get_screen_position(&game.tileGrid, halfgridPos + bounce_dir)
+        vel := (fwd_pos - screenHalfPos)
+
+        shot.velocity = vel * speed
+      }
+
+      tile.durability -= 1
+
+      if tile.durability == 0 {
+        tile^ = {}
+      }
+    }
+
+    if tile.type == .Land || tile.type == .Cannon {
+      tile^ = {}
+    }
+
+    if !within_halfgrid_range(game.tileGrid.size, halfgridPos) {
       shot.exploded = true;
       game.exploded_count += 1;
       
       origin_tile := get_tile(&game.tileGrid, shot.pos)
-
-      fmt.println(origin_tile)
-
       origin_tile.shotIds = {}
-
-      tile^ = {}
     }
 
     rl.DrawCircle(i32(shot.position.x), i32(shot.position.y), size, rl.BLACK)
@@ -681,6 +733,17 @@ update_game :: proc(game: ^Game, dt: f32) {
         }, "play", rl.GRAY)
 
         if rl.IsKeyPressed(.P) || play {
+          game.state = .Playing
+        }
+      case .PostSimulate:
+        start := button(&game.ui, rl.Rectangle{
+          x = f32(rl.GetScreenWidth())/2 - 75,
+          y = f32(rl.GetScreenHeight())/2 - 75,
+          width = 150,
+          height = 150,
+        }, "continue", rl.GRAY)
+
+        if start {
           game.state = .Playing
         }
       case .BetweenRounds:
