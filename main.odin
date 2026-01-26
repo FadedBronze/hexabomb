@@ -15,29 +15,39 @@ tileTypeCost := []u16{
   0,
   1,
   1,
+  0,
+  1,
+  5,
   1,
   1,
-  3,
-  2,
   1,
 }
-  
+
 directions := [][2]i16 {
   {0, 2},
-  {0, -2},
-  {-1, 1},
-  {-1, -1},
   {1, 1},
   {1, -1},
+  {0, -2},
+  {-1, -1},
+  {-1, 1},
+}
+
+directionHexnormalized := [][2]f32 {
+  {0, 1},
+  {math.sqrt_f32(3)/2, 0.5},
+  {math.sqrt_f32(3)/2, -0.5},
+  {0, -1},
+  {-math.sqrt_f32(3)/2, -0.5},
+  {-math.sqrt_f32(3)/2, 0.5},
 }
 
 HexDirection :: enum {
   Up,
-  Down,
-  LeftUp,
-  LeftDown,
   RightUp,
   RightDown,
+  Down,
+  LeftDown,
+  LeftUp,
 }
 
 TileType :: enum {
@@ -50,10 +60,12 @@ TileType :: enum {
   Nuke,
   Mortar,
   MortarTarget,
+  Telescope,
 }
 
 Visibility :: enum {
   Visible,
+  VeryVisible,
   Invisible,
 }
 
@@ -65,6 +77,8 @@ Tile :: struct {
   entityIds: [8]u32, 
   type: TileType,
   durability: u8,
+  damage: u8,
+  direction: HexDirection,
 }
 
 Cannon :: struct {
@@ -217,6 +231,7 @@ SimulationEntity :: struct {
   completed: bool,
   playerIndex: u32,
   halfgridPos: HalfGridPosition,
+  damage: u8,
   using shot: Shot,
 }
 
@@ -230,7 +245,9 @@ GameState :: enum {
 
 Game :: struct {
   state: GameState,
+  order: bool,
   currentPlayerIndex: u32,
+  rounds: u32,
   players: [4]Player,
   playerCount: u32,
   tileGrid: TileGrid,
@@ -250,20 +267,20 @@ init_tilegrid :: proc(tileGrid: ^TileGrid, ui: ^UI) {
   hexagonSize: i32 = 30
 
   tileGrid^ = TileGrid {
-    size = 8,
+    size = 6,
     hexagonSize = hexagonSize,
     activeTileId = 0,
   }
 
   update_tilegrid_offset(tileGrid)
   
-  get_tile(tileGrid, {3, 3})^ = Tile {
+  get_tile(tileGrid, {2, 2})^ = Tile {
     playerIndex = 0,
     type = .Land,
     visibility = .Invisible,
   }
   
-  get_tile(tileGrid, {-3, -3})^ = Tile {
+  get_tile(tileGrid, {-2, -2})^ = Tile {
     playerIndex = 1,
     type = .Land,
     visibility = .Invisible,
@@ -277,7 +294,7 @@ update_tilegrid_offset :: proc(tileGrid: ^TileGrid) {
 
 init_game :: proc(game: ^Game) {
   game^ = Game {
-    currentPlayerIndex = 1,
+    currentPlayerIndex = 0,
     playerCount = 2,
   }
 
@@ -285,12 +302,14 @@ init_game :: proc(game: ^Game) {
     color = rl.BLUE,
     username = "Blue",
     selectedTileType = .Land,
+    nukes = 1,
   }
 
   game.players[1] = Player {
     color = rl.RED,
     username = "Red",
     selectedTileType = .Land,
+    nukes = 1,
   }
   
   //game.players[2] = Player {
@@ -367,6 +386,9 @@ hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player, ui: ^UI, id := #cal
       rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{255, 0, 0, 255})
       rl.DrawCircle(i32(spos.x), i32(spos.y), 10, rl.Color{255, 255, 255, 255})
       rl.DrawCircle(i32(spos.x), i32(spos.y), 5, rl.Color{255, 0, 0, 255})
+    case .Telescope:
+      rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{255, 255, 0, 255})
+      rl.DrawCircle(i32(spos.x), i32(spos.y), 18, rl.Color{255, 255, 255, 255})
     }
   } else {
     outline_hexagon_halfgrid(halfgrid, tileGrid.offset, rl.RED, tileGrid.hexagonSize)
@@ -387,19 +409,38 @@ click_tile :: proc(game: ^Game) {
       player.selectedTileType = .BlastTarget
     }
     
-    if hovered_tile.type == .Mortar && hovered_tile.playerIndex == game.currentPlayerIndex {
-      game.tileGrid.activeTileId = get_tile_id(halfgrid)
-      
-      player.editMode = .Placing
-      player.selectedTileType = .MortarTarget
-    }
-
     if hovered_tile.type == .Shield && hovered_tile.playerIndex == game.currentPlayerIndex {
+      game.tileGrid.activeTileId = get_tile_id(halfgrid)
+    }
+    
+    if hovered_tile.type == .Mortar && hovered_tile.playerIndex == game.currentPlayerIndex {
       game.tileGrid.activeTileId = get_tile_id(halfgrid)
     }
   }
 
   tile, pos := get_active_tile(&game.tileGrid)
+  
+  if tile != nil && tile.type == .Mortar {
+    row_layout(&game.ui, .Down, la.Vector2f32{f32(rl.GetScreenWidth()) - 10 - 75, f32(rl.GetScreenHeight()) / 2 - 52.5}, 5)
+
+    if (button(&game.ui, rl.Rectangle {
+      width = 75,
+      height = 50,
+    }, "+1", player.color) && player.energy >= 2) {
+      tile.damage += 1
+      player.energy -= 2
+    }
+    
+    if (button(&game.ui, rl.Rectangle {
+      width = 75,
+      height = 50,
+    }, "fire", player.color)) {
+      player.editMode = .Placing
+      player.selectedTileType = .MortarTarget
+    }
+    
+    row_layout_end(&game.ui)
+  }
 
   if tile != nil && tile.type == .Shield {
     row_layout(&game.ui, .Down, la.Vector2f32{f32(rl.GetScreenWidth()) - 10 - 75, f32(rl.GetScreenHeight()) / 2 - 52.5}, 5)
@@ -412,6 +453,13 @@ click_tile :: proc(game: ^Game) {
       player.energy -= 1
     }
     
+    if (button(&game.ui, rl.Rectangle {
+      width = 75,
+      height = 50,
+    }, "rotate", player.color)) {
+      tile.direction = HexDirection((u8(tile.direction)+1)%6)
+    }
+    
     row_layout_end(&game.ui)
   }
 }
@@ -422,6 +470,7 @@ EditMode :: enum {
 }
 
 Player :: struct {
+  nukes: u8,
   color: rl.Color,
   selectedTileType: TileType,
   editMode: EditMode,
@@ -446,6 +495,17 @@ test_adjacent_cell :: proc(game: ^Game, p: HalfGridPosition, test: proc(game: ^G
   }
 
   return false;
+}
+
+render_number :: proc(spos: la.Vector2f32, number: u8) {
+  buf: [2]u8
+  buf[0] = number + '0'
+  buf[1] = 0
+
+  str: cstring = transmute(cstring)&buf
+
+  width := rl.MeasureText(str, 20)
+  rl.DrawText(str, i32(spos.x) - width / 2, i32(spos.y) - 20 / 2, 20, rl.BLACK)
 }
 
 render_gameboard :: proc(game: ^Game) {
@@ -474,36 +534,46 @@ render_gameboard :: proc(game: ^Game) {
 
     if tile.type != .Free && tile.type != .Blocked && tile.type != .BlastTarget {
       fill_hexagon_halfgrid(pos, tileGrid.offset, player.color, tileGrid.hexagonSize)
+    }
 
-      if ((game.currentPlayerIndex == tile.playerIndex || tile.visibility == .Visible) && game.state == .Playing) {
-        if tile.type == .Cannon {
-          spos := get_screen_position(&game.tileGrid, pos)
-          rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
-        }
+    if ((game.currentPlayerIndex == tile.playerIndex || tile.visibility == .Visible || tile.visibility == .VeryVisible) && game.state == .Playing) {
+      spos := get_screen_position(&game.tileGrid, pos)
 
-        if tile.type == .Mortar {
-          spos := get_screen_position(&game.tileGrid, pos)
-          rl.DrawCircle(i32(spos.x)+5, i32(spos.y), 10, rl.Color{200, 200, 200, 255})
-          rl.DrawCircle(i32(spos.x), i32(spos.y)+5, 10, rl.Color{200, 200, 200, 255})
-          rl.DrawCircle(i32(spos.x)+2, i32(spos.y)+2, 10, rl.Color{200, 200, 200, 255})
-        }
+      switch tile.type {
+      case .Cannon:
+        rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
+      case .Mortar:
+        rl.DrawCircle(i32(spos.x)+15, i32(spos.y), 10, rl.Color{200, 200, 200, 255})
+        rl.DrawCircle(i32(spos.x), i32(spos.y)+15, 10, rl.Color{200, 200, 200, 255})
+        rl.DrawCircle(i32(spos.x)+7, i32(spos.y)+7, 10, rl.Color{200, 200, 200, 255})
         
-        if tile.type == .Shield {
-          spos := get_screen_position(&game.tileGrid, pos)
-          fill_hexagon(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
-
-          if game.currentPlayerIndex == tile.playerIndex {
-            buf: [2]u8
-            buf[0] = tile.durability + '0'
-            buf[1] = 0
-
-            str: cstring = transmute(cstring)&buf
-
-            width := rl.MeasureText(str, 20)
-            rl.DrawText(str, i32(spos.x) - width / 2, i32(spos.y) - 20 / 2, 20, rl.BLACK)
-          }
+        if game.currentPlayerIndex == tile.playerIndex || tile.visibility == .VeryVisible {
+          render_number(spos, tile.damage)
         }
+      case .Telescope:
+        rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{255, 255, 0, 255})
+        rl.DrawCircle(i32(spos.x), i32(spos.y), 18, rl.Color{255, 255, 255, 255})
+      case .Shield:
+        fill_hexagon(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
 
+        if game.currentPlayerIndex == tile.playerIndex || tile.visibility == .VeryVisible {
+          render_number(spos, tile.durability)
+
+          dir := directionHexnormalized[tile.direction] * 7
+
+          rl.DrawTriangle(
+            spos + directionHexnormalized[(i8(tile.direction)+1)%6] * 8 + dir,
+            spos + directionHexnormalized[(i8(tile.direction)-1 == -1) ? 5 : i8(tile.direction)-1] * 8 + dir, 
+            spos + directionHexnormalized[tile.direction] * 8 + dir, 
+          rl.Color{0, 0, 0, 255})
+        }
+      case .Blocked:
+        fill_hexagon(i32(spos.x), i32(spos.y), game.tileGrid.hexagonSize, rl.Color{255, 255, 255, 255})
+      case .Free:
+      case .Nuke:
+      case .Land:
+      case .BlastTarget:
+      case .MortarTarget:
       }
     }
 
@@ -574,6 +644,8 @@ place_tile :: proc(game: ^Game) {
   player := &game.players[game.currentPlayerIndex]
   halfgridPos := get_tile_grid_pos(&game.tileGrid, rl.GetMousePosition())
   tile := get_tile(&game.tileGrid, halfgridPos)
+  activeTile, activeTileHalfgridPos := get_active_tile(&game.tileGrid)
+  is_next, dir := next_to(halfgridPos, activeTileHalfgridPos)
 
   if !rl.IsMouseButtonPressed(.LEFT) {
     return
@@ -583,30 +655,33 @@ place_tile :: proc(game: ^Game) {
     return
   }
 
-  if player.selectedTileType == .Nuke && within_game_bounds(game, halfgridPos) && pay_active_tile_cost(player) {
-    add_entity(game, halfgridPos, SimulationEntity {}, EntityType.Nuke)
+  if player.selectedTileType == .Nuke && within_game_bounds(game, halfgridPos) && pay_active_tile_cost(player) && player.nukes > 0 {
+    player.nukes -= 1
+    add_entity(game, halfgridPos, SimulationEntity {
+      damage = 2
+    }, EntityType.Nuke)
   }
   
   if player.selectedTileType == .MortarTarget && within_game_bounds(game, halfgridPos) && pay_active_tile_cost(player) {
-    add_entity(game, halfgridPos, SimulationEntity {}, EntityType.MortarShot)
+    add_entity(game, halfgridPos, SimulationEntity {
+      damage = activeTile.damage
+    }, EntityType.MortarShot)
 
     game.tileGrid.activeTileId = 0
     player.editMode = .Clicking
   }
-  
-  cannon, cannonHalfgridPos := get_active_tile(&game.tileGrid)
-  is_next, dir := next_to(halfgridPos, cannonHalfgridPos)
-  
+   
   if player.selectedTileType == .BlastTarget && is_next && pay_active_tile_cost(player) && within_game_bounds(game, halfgridPos) {
-    pos := get_screen_position(&game.tileGrid, cannonHalfgridPos)
-    fwd_pos := get_screen_position(&game.tileGrid, cannonHalfgridPos - directions[dir])
+    pos := get_screen_position(&game.tileGrid, activeTileHalfgridPos)
+    fwd_pos := get_screen_position(&game.tileGrid, activeTileHalfgridPos - directions[dir])
     vel := (fwd_pos - pos)
 
     add_entity(game, halfgridPos, SimulationEntity {
       shot = Shot {
         velocity = vel * CANNONBALL_SPEED,
         position = fwd_pos + (pos - fwd_pos) * 0.25
-      }
+      },
+      damage = 1
     }, EntityType.Shot)
 
     game.tileGrid.activeTileId = 0
@@ -632,22 +707,55 @@ place_tile :: proc(game: ^Game) {
     tile.visibility = .Invisible
     tile.playerIndex = game.currentPlayerIndex
     tile.type = player.selectedTileType
+
     if player.selectedTileType == .Shield {
-      tile.durability = 2
+      tile.durability = 1
+    }
+    
+    if player.selectedTileType == .Mortar {
+      tile.damage = 1
+    }
+
+    if tile.type == .Telescope {
+      for dir in directions {
+        pos := halfgridPos
+
+        for within_game_bounds(game, pos) {
+          pos += dir
+
+          get_tile(&game.tileGrid, pos).visibility = .VeryVisible
+        }
+      }
     }
   }   
 }
 
 start_next_turn :: proc (game: ^Game) {
-  game.currentPlayerIndex += 1
+  if game.order {
+    game.currentPlayerIndex += 1
 
-  if game.currentPlayerIndex == game.playerCount {
-    game.currentPlayerIndex = 0
-    game.state = .BetweenRounds
+    if game.currentPlayerIndex == game.playerCount {
+      game.currentPlayerIndex = game.playerCount - 1
+      game.state = .BetweenRounds
+      game.order = !game.order
+  
+      game.rounds += 1
+    }
+  } else {
+    if game.currentPlayerIndex == 0 {
+      game.currentPlayerIndex = 1
+      game.state = .BetweenRounds
+      game.order = !game.order
+      
+      game.rounds += 1
+    }
+
+    game.currentPlayerIndex -= 1  
   }
 
+  game.tileGrid.activeTileId = 0
   player := &game.players[game.currentPlayerIndex]
-  player.energy = 5
+  player.energy = 3
 }
 
 ui_layout :: proc(game: ^Game) {
@@ -680,20 +788,30 @@ ui_layout :: proc(game: ^Game) {
     player.selectedTileType = .Shield
     player.editMode = .Placing
   }
-  
-  if (button(ui, rl.Rectangle {
-    width = 100,
-    height = 75,
-  }, "nuke", player.color)) {
-    player.selectedTileType = .Nuke
-    player.editMode = .Placing
-  }
+
+  if player.nukes != 0 {
+    if (button(ui, rl.Rectangle {
+      width = 100,
+      height = 75,
+    }, "nuke", player.color)) {
+      player.selectedTileType = .Nuke
+      player.editMode = .Placing
+    }
+  }  
 
   if (button(ui, rl.Rectangle {
     width = 100,
     height = 75,
   }, "mortar", player.color)) {
     player.selectedTileType = .Mortar
+    player.editMode = .Placing
+  }
+  
+  if (button(ui, rl.Rectangle {
+    width = 100,
+    height = 75,
+  }, "lookout", player.color)) {
+    player.selectedTileType = .Telescope
     player.editMode = .Placing
   }
 
@@ -784,14 +902,15 @@ simulate :: proc(game: ^Game, dt: f32) {
 
     switch entity.type { 
     case .MortarShot:
-      damage_tile(get_tile(&game.tileGrid, entity.halfgridPos), 2)
+      tile := get_tile(&game.tileGrid, entity.halfgridPos)
+      damage_tile(get_tile(&game.tileGrid, entity.halfgridPos), entity.damage)
       
       complete_entity(game, entity)
     case .Nuke:
-      damage_tile(get_tile(&game.tileGrid, entity.halfgridPos), 1)
+      damage_tile(get_tile(&game.tileGrid, entity.halfgridPos), entity.damage)
 
       for dir in directions {
-        damage_tile(get_tile(&game.tileGrid, entity.halfgridPos + dir), 1)
+        damage_tile(get_tile(&game.tileGrid, entity.halfgridPos + dir), entity.damage)
       }
 
       complete_entity(game, entity)
@@ -810,40 +929,31 @@ simulate :: proc(game: ^Game, dt: f32) {
 
       screenHalfPos := get_screen_position(&game.tileGrid, halfgridPos)
 
-      if tile.type != .Shield {
-        prev_tile := get_tile(&game.tileGrid, get_tile_grid_pos(&game.tileGrid, prevpos))
+      prev_tile := get_tile(&game.tileGrid, get_tile_grid_pos(&game.tileGrid, prevpos))
 
-        if prev_tile.type == .Shield && prev_tile.playerIndex != entity.playerIndex {
-          damage_tile(prev_tile, 1)
-        }
+      if prev_tile != tile && prev_tile.playerIndex != entity.playerIndex {
+        damage_tile(prev_tile, entity.damage)
       }
+      
+      if tile.type == .Shield {
+      //  availableDirs: [6][2]i16
+      //  availableDirCount: u32 = 0
 
-      if tile.type == .Shield && la.length(prevpos - screenHalfPos) > la.length(shot.position - screenHalfPos) {
-        availableDirs: [6][2]i16
-        availableDirCount: u32 = 0
+      //  for dir in directions {
+      //    tile := get_tile(&game.tileGrid, halfgridPos + dir)
+      //    if tile.type == .Free && within_halfgrid_range(game.tileGrid.size, halfgridPos + dir) {
+      //      availableDirs[availableDirCount] = dir
+      //      availableDirCount += 1
+      //    }
+      //  }
 
-        for dir in directions {
-          tile := get_tile(&game.tileGrid, halfgridPos + dir)
-          if tile.type == .Free && within_halfgrid_range(game.tileGrid.size, halfgridPos + dir) {
-            availableDirs[availableDirCount] = dir
-            availableDirCount += 1
-          }
-        }
+        
+        bounce_dir := directions[tile.direction]
 
-        if availableDirCount == 0 {
-          complete_entity(game, entity)
-        } else {
-          bounce_dir := availableDirs[u32(rand.float32() * f32(availableDirCount))]
+        fwd_pos := get_screen_position(&game.tileGrid, halfgridPos + bounce_dir)
+        vel := (fwd_pos - screenHalfPos)
 
-          fwd_pos := get_screen_position(&game.tileGrid, halfgridPos + bounce_dir)
-          vel := (fwd_pos - screenHalfPos)
-
-          shot.velocity = vel * CANNONBALL_SPEED
-        }
-      }
-
-      if tile.type == .Land || tile.type == .Cannon {
-        tile^ = {}
+        shot.velocity = vel * CANNONBALL_SPEED
       }
 
       if !within_halfgrid_range(game.tileGrid.size, halfgridPos) {
@@ -852,7 +962,7 @@ simulate :: proc(game: ^Game, dt: f32) {
 
       rl.DrawCircle(i32(shot.position.x), i32(shot.position.y), size, rl.BLACK)
     }
-    }
+  }
 }
 
 update_game :: proc(game: ^Game, dt: f32) {
@@ -930,3 +1040,4 @@ main :: proc() {
     rl.EndDrawing()
   }
 }
+
