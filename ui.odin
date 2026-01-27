@@ -3,6 +3,7 @@ package main
 import rl "vendor:raylib"
 import rn "base:runtime"
 import la "core:math/linalg"
+import strings "core:strings"
 
 BUTTON_FONT_SIZE :: 22
 
@@ -78,7 +79,7 @@ update_layout :: proc(ui: ^UI, rectangle: ^rl.Rectangle) {
   }
 }
 
-button :: proc(ui: ^UI, rectangle: rl.Rectangle, text: cstring, color: rl.Color, id := #caller_location) -> bool {
+button :: proc(ui: ^UI, rectangle: rl.Rectangle, text: string, color: rl.Color, id := #caller_location) -> bool {
   rectangle := rectangle
 
   update_layout(ui, &rectangle)
@@ -109,9 +110,11 @@ button :: proc(ui: ^UI, rectangle: rl.Rectangle, text: cstring, color: rl.Color,
     pressed = rl.IsMouseButtonPressed(.LEFT)
   }
 
-  text_width := rl.MeasureText(text, BUTTON_FONT_SIZE)
+  str := strings.unsafe_string_to_cstring(strings.concatenate({text, "\x00"}))
 
-  rl.DrawText(text, i32(rectangle.x + rectangle.width/2) - i32(text_width)/2, i32(rectangle.y + rectangle.height/2) - BUTTON_FONT_SIZE/2, BUTTON_FONT_SIZE, rl.BLACK)
+  text_width := rl.MeasureText(str, BUTTON_FONT_SIZE)
+
+  rl.DrawText(str, i32(rectangle.x + rectangle.width/2) - i32(text_width)/2, i32(rectangle.y + rectangle.height/2) - BUTTON_FONT_SIZE/2, BUTTON_FONT_SIZE, rl.BLACK)
 
   return pressed
 }

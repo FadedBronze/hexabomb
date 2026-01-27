@@ -4,7 +4,6 @@ import "core:fmt"
 import rl "vendor:raylib"
 import "core:math"
 import la "core:math/linalg"
-import "core:math/rand"
 
 MAX_GRID_SIZE :: 32 
 CANNONBALL_SPEED :: 4
@@ -236,6 +235,8 @@ SimulationEntity :: struct {
 }
 
 GameState :: enum {
+  Connecting,
+  InLobby,
   Playing,
   BetweenRounds,
   Simulate,
@@ -244,6 +245,9 @@ GameState :: enum {
 }
 
 Game :: struct {
+  ui: UI,
+  network: Network,
+
   state: GameState,
   order: bool,
   currentPlayerIndex: u32,
@@ -251,7 +255,6 @@ Game :: struct {
   players: [4]Player,
   playerCount: u32,
   tileGrid: TileGrid,
-  ui: UI,
 
   entities: [MAX_ENTITIES]SimulationEntity,
   entity_count: u32,
@@ -319,8 +322,7 @@ init_game :: proc(game: ^Game) {
   //}
 
   init_tilegrid(&game.tileGrid, &game.ui)
-
-  start_next_turn(game)
+  init_network(&game.network)
 }
 
 get_tile_id :: proc(pos: HalfGridPosition) -> u32 {
@@ -972,6 +974,56 @@ update_game :: proc(game: ^Game, dt: f32) {
     render_gameboard(game)
 
     switch game.state {
+      case .InLobby:
+        if client_is_lobby_master(&game.network) {
+          broadcast_my_lobby_name(&game.network)
+        }
+      case .Connecting:
+        rl.DrawRectangle(0, 0, rl.GetScreenWidth(), rl.GetScreenHeight(), rl.Color{
+          0, 0, 0, 150
+        })
+
+        retrieve_lobby_entries(&game.network)
+
+        row_layout(&game.ui, .Up, la.Vector2f32{
+          f32(rl.GetScreenWidth())/2 - 75,
+          f32(rl.GetScreenHeight())/2 - 75,
+        }, 10)
+
+        lobby_count := game.network.lobbyEntryCount
+
+        room1 := button(&game.ui, rl.Rectangle{
+          width = 150,
+          height = 50,
+        }, lobby_count > 0 ? fmt_lobby_name(&game.network.lobbyEntries[0]) : "--", rl.GRAY)
+        
+        room2 := button(&game.ui, rl.Rectangle{
+          width = 150,
+          height = 50,
+        }, lobby_count > 1 ? fmt_lobby_name(&game.network.lobbyEntries[1]) : "--", rl.GRAY)
+        
+        room3 := button(&game.ui, rl.Rectangle{
+          width = 150,
+          height = 50,
+        }, lobby_count > 2 ? fmt_lobby_name(&game.network.lobbyEntries[2]) : "--", rl.GRAY)
+        
+        room4 := button(&game.ui, rl.Rectangle{
+          width = 150,
+          height = 50,
+        }, lobby_count > 3 ? fmt_lobby_name(&game.network.lobbyEntries[3]) : "--", rl.GRAY)
+        
+        create_room := button(&game.ui, rl.Rectangle{
+          width = 150,
+          height = 50,
+        }, "create room", rl.GRAY)
+
+        row_layout_end(&game.ui)
+
+        if (create_room) {
+          create_lobby(&game.network, "the room")
+          game.state = .InLobby
+          //start_next_turn(game)
+        }
       case .Paused:
         play := button(&game.ui, rl.Rectangle{
           x = f32(rl.GetScreenWidth())/2 - 75,
