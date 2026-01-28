@@ -120,14 +120,15 @@ button :: proc(ui: ^UI, rectangle: rl.Rectangle, text: string, color: rl.Color, 
   return pressed
 }
 
-text_display :: proc(ui: ^UI, rectangle: rl.Rectangle, text: cstring, color: rl.Color, id := #caller_location) {
+text_display :: proc(ui: ^UI, rectangle: rl.Rectangle, text: string, color: rl.Color, id := #caller_location) {
   rectangle := rectangle
 
   update_layout(ui, &rectangle)
 
-  text_width := rl.MeasureText(text, BUTTON_FONT_SIZE)
+  str := strings.unsafe_string_to_cstring(strings.concatenate({text, "\x00"}))
 
-  rl.DrawText(text, i32(rectangle.x + rectangle.width/2) - i32(text_width)/2, i32(rectangle.y + rectangle.height/2) - BUTTON_FONT_SIZE/2, BUTTON_FONT_SIZE, color)
+  text_width := rl.MeasureText(str, BUTTON_FONT_SIZE)
+  rl.DrawText(str, i32(rectangle.x + rectangle.width/2) - i32(text_width)/2, i32(rectangle.y + rectangle.height/2) - BUTTON_FONT_SIZE/2, BUTTON_FONT_SIZE, color)
 }
 
 empty_id :: proc() -> rn.Source_Code_Location {

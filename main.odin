@@ -8,6 +8,7 @@ import la "core:math/linalg"
 MAX_GRID_SIZE :: 32 
 CANNONBALL_SPEED :: 4
 HALF_MAX_GRID_SIZE :: MAX_GRID_SIZE / 2
+MAX_PLAYERS :: 4
 
 tileTypeCost := []u16{
   0, 
@@ -71,7 +72,7 @@ Visibility :: enum {
 HalfGridPosition :: [2]i16
 
 Tile :: struct {
-  playerIndex: u32,
+  playerIndex: u8,
   visibility: Visibility,
   entityIds: [8]u32, 
   type: TileType,
@@ -85,7 +86,6 @@ Cannon :: struct {
 }
 
 TileGrid :: struct {
-  activeTileId: u32,
   tiles: [MAX_GRID_SIZE * MAX_GRID_SIZE]Tile,
   hexagonSize: i32,
   offset: [2]i32,
@@ -228,18 +228,30 @@ EntityType :: enum {
 SimulationEntity :: struct {
   type: EntityType,
   completed: bool,
-  playerIndex: u32,
+  playerIndex: u8,
   halfgridPos: HalfGridPosition,
   damage: u8,
   using shot: Shot,
 }
 
 GameState :: enum {
-  Playing,
   BetweenRounds,
+  Playing,
   Simulate,
   PostSimulate,
   Paused,
+}
+
+Player :: struct {
+  nukes: u8,
+  color: rl.Color,
+  selectedTileType: TileType,
+  editMode: EditMode,
+  energy: u16,
+  username: string,
+  activeTileId: u32,
+  inputState: ^InputState,
+  virtual: bool,
 }
 
 Game :: struct {
@@ -247,12 +259,12 @@ Game :: struct {
 
   state: GameState,
   order: bool,
-  currentPlayerIndex: u32,
   rounds: u32,
-  players: [4]Player,
-  playerCount: u32,
-  tileGrid: TileGrid,
 
+  playerCount: u8,
+  players: [MAX_PLAYERS]Player,
+
+  tileGrid: TileGrid,
   entities: [MAX_ENTITIES]SimulationEntity,
   entity_count: u32,
   completed_entities: u32,
@@ -269,7 +281,6 @@ init_tilegrid :: proc(tileGrid: ^TileGrid, ui: ^UI) {
   tileGrid^ = TileGrid {
     size = 6,
     hexagonSize = hexagonSize,
-    activeTileId = 0,
   }
 
   update_tilegrid_offset(tileGrid)
@@ -292,46 +303,22 @@ update_tilegrid_offset :: proc(tileGrid: ^TileGrid) {
   tileGrid.offset = {rl.GetScreenWidth() / 2 - half_length, rl.GetScreenHeight() / 2 - tileGrid.hexagonSize}
 }
 
-init_game :: proc(game: ^Game) {
-  game^ = Game {
-    currentPlayerIndex = 0,
-    playerCount = 2,
-  }
-
-  game.ui.virtual = false
-
-  game.players[0] = Player {
-    color = rl.BLUE,
-    username = "Blue",
-    selectedTileType = .Land,
-    nukes = 1,
-  }
-
-  game.players[1] = Player {
-    color = rl.RED,
-    username = "Red",
-    selectedTileType = .Land,
-    nukes = 1,
-  }
-  
-  //game.players[2] = Player {
-  //  color = rl.GREEN,
-  //  username = "Green",
-  //  selectedTileType = .Land,
-  //}
-
-  init_tilegrid(&game.tileGrid, &game.ui)
+playerColors := [4]rl.Color {
+  rl.BLUE,
+  rl.RED,
+  rl.GREEN,
+  rl.ORANGE,
 }
 
 get_tile_id :: proc(pos: HalfGridPosition) -> u32 {
   return u32((pos.y + HALF_MAX_GRID_SIZE) * MAX_GRID_SIZE + (pos.x + HALF_MAX_GRID_SIZE)) + 1
 }
 
-get_active_tile :: proc(tilegrid: ^TileGrid) -> (^Tile, HalfGridPosition) {
-  if tilegrid.activeTileId == 0 {
+get_active_tile :: proc(tilegrid: ^TileGrid, player: ^Player) -> (^Tile, HalfGridPosition) {
+  if player.activeTileId == 0 {
     return nil, {}
   }
-  idx := tilegrid.activeTileId-1
+  idx := player.activeTileId-1
 
   x := idx % MAX_GRID_SIZE
   y := idx / MAX_GRID_SIZE
@@ -350,7 +337,7 @@ hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player, ui: ^UI, id := #cal
   halfgrid := get_tile_grid_pos(tileGrid, rl.GetMousePosition())
 
   if player.editMode == .Clicking {
-      if tileGrid.activeTileId != 0 {
+      if player.activeTileId != 0 {
         return
       }
 
@@ -395,30 +382,30 @@ hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player, ui: ^UI, id := #cal
   }
 }
 
-click_tile :: proc(game: ^Game) {
+click_tile :: proc(game: ^Game, currentPlayerIndex: u8) {
   halfgrid := get_tile_grid_pos(&game.tileGrid, rl.GetMousePosition())
   hovered_tile := get_tile(&game.tileGrid, halfgrid)
 
-  player := &game.players[game.currentPlayerIndex]
+  player := &game.players[currentPlayerIndex]
 
   if rl.IsMouseButtonPressed(.LEFT) {
-    if hovered_tile.type == .Cannon && hovered_tile.playerIndex == game.currentPlayerIndex {
-      game.tileGrid.activeTileId = get_tile_id(halfgrid)
+    if hovered_tile.type == .Cannon && hovered_tile.playerIndex == currentPlayerIndex {
+      player.activeTileId = get_tile_id(halfgrid)
       
       player.editMode = .Placing
       player.selectedTileType = .BlastTarget
     }
     
-    if hovered_tile.type == .Shield && hovered_tile.playerIndex == game.currentPlayerIndex {
-      game.tileGrid.activeTileId = get_tile_id(halfgrid)
+    if hovered_tile.type == .Shield && hovered_tile.playerIndex == currentPlayerIndex {
+      player.activeTileId = get_tile_id(halfgrid)
     }
     
-    if hovered_tile.type == .Mortar && hovered_tile.playerIndex == game.currentPlayerIndex {
-      game.tileGrid.activeTileId = get_tile_id(halfgrid)
+    if hovered_tile.type == .Mortar && hovered_tile.playerIndex == currentPlayerIndex {
+      player.activeTileId = get_tile_id(halfgrid)
     }
   }
 
-  tile, pos := get_active_tile(&game.tileGrid)
+  tile, pos := get_active_tile(&game.tileGrid, player)
   
   if tile != nil && tile.type == .Mortar {
     row_layout(&game.ui, .Down, la.Vector2f32{f32(rl.GetScreenWidth()) - 10 - 75, f32(rl.GetScreenHeight()) / 2 - 52.5}, 5)
@@ -469,15 +456,6 @@ EditMode :: enum {
   Clicking,
 }
 
-Player :: struct {
-  nukes: u8,
-  color: rl.Color,
-  selectedTileType: TileType,
-  editMode: EditMode,
-  energy: u16,
-  username: cstring,
-}
-
 next_to :: proc(a: HalfGridPosition, b: HalfGridPosition) -> (bool, HexDirection) {
   for point, i in directions {
     if a + point == b {
@@ -487,9 +465,9 @@ next_to :: proc(a: HalfGridPosition, b: HalfGridPosition) -> (bool, HexDirection
   return false, HexDirection(0)
 }
 
-test_adjacent_cell :: proc(game: ^Game, p: HalfGridPosition, test: proc(game: ^Game, tile: ^Tile) -> bool) -> bool {
+test_adjacent_cell :: proc(game: ^Game, currentPlayerIndex: u8, p: HalfGridPosition, test: proc(game: ^Game, currentPlayerIndex: u8, tile: ^Tile) -> bool) -> bool {
   for point in directions {
-    if test(game, get_tile(&game.tileGrid, point + p)) {
+    if test(game, currentPlayerIndex, get_tile(&game.tileGrid, point + p)) {
       return true;
     }
   }
@@ -508,7 +486,7 @@ render_number :: proc(spos: la.Vector2f32, number: u8) {
   rl.DrawText(str, i32(spos.x) - width / 2, i32(spos.y) - 20 / 2, 20, rl.BLACK)
 }
 
-render_gameboard :: proc(game: ^Game) {
+render_gameboard :: proc(game: ^Game, currentPlayerIndex: u8) {
   tileGrid := &game.tileGrid
 
   size: i32 = tileGrid.hexagonSize
@@ -536,7 +514,7 @@ render_gameboard :: proc(game: ^Game) {
       fill_hexagon_halfgrid(pos, tileGrid.offset, player.color, tileGrid.hexagonSize)
     }
 
-    if ((game.currentPlayerIndex == tile.playerIndex || tile.visibility == .Visible || tile.visibility == .VeryVisible) && game.state == .Playing) {
+    if ((currentPlayerIndex == tile.playerIndex || tile.visibility == .Visible || tile.visibility == .VeryVisible) && game.state == .Playing) {
       spos := get_screen_position(&game.tileGrid, pos)
 
       switch tile.type {
@@ -547,7 +525,7 @@ render_gameboard :: proc(game: ^Game) {
         rl.DrawCircle(i32(spos.x), i32(spos.y)+15, 10, rl.Color{200, 200, 200, 255})
         rl.DrawCircle(i32(spos.x)+7, i32(spos.y)+7, 10, rl.Color{200, 200, 200, 255})
         
-        if game.currentPlayerIndex == tile.playerIndex || tile.visibility == .VeryVisible {
+        if currentPlayerIndex == tile.playerIndex || tile.visibility == .VeryVisible {
           render_number(spos, tile.damage)
         }
       case .Telescope:
@@ -556,7 +534,7 @@ render_gameboard :: proc(game: ^Game) {
       case .Shield:
         fill_hexagon(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
 
-        if game.currentPlayerIndex == tile.playerIndex || tile.visibility == .VeryVisible {
+        if currentPlayerIndex == tile.playerIndex || tile.visibility == .VeryVisible {
           render_number(spos, tile.durability)
 
           dir := directionHexnormalized[tile.direction] * 7
@@ -588,7 +566,7 @@ render_gameboard :: proc(game: ^Game) {
 
       entity := game.entities[entityId-1]
 
-      if entity.playerIndex == game.currentPlayerIndex {
+      if entity.playerIndex == currentPlayerIndex {
         spos := get_screen_position(&game.tileGrid, pos)
         rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{255, 0, 0, 125})
         rl.DrawCircle(i32(spos.x), i32(spos.y), 10, rl.Color{255, 255, 255, 125})
@@ -608,7 +586,7 @@ append_entityId :: proc(tile: ^Tile, entityId: u32) {
   }
 }
 
-add_entity :: proc(game: ^Game, halfgridPos: HalfGridPosition, entity: SimulationEntity, type: EntityType) {
+add_entity :: proc(game: ^Game, currentPlayerIndex: u8, halfgridPos: HalfGridPosition, entity: SimulationEntity, type: EntityType) {
   tile := get_tile(&game.tileGrid, halfgridPos)
 
   append_entityId(tile, game.entity_count+1)
@@ -617,7 +595,7 @@ add_entity :: proc(game: ^Game, halfgridPos: HalfGridPosition, entity: Simulatio
 
   entity := &game.entities[game.entity_count]
 
-  entity.playerIndex = game.currentPlayerIndex
+  entity.playerIndex = currentPlayerIndex
   entity.halfgridPos = halfgridPos
   entity.completed = false
   entity.type = type
@@ -640,11 +618,11 @@ within_game_bounds :: proc(game: ^Game, halfgridPos: HalfGridPosition) -> bool {
   return within_halfgrid_range(game.tileGrid.size, halfgridPos)
 }
 
-place_tile :: proc(game: ^Game) {
-  player := &game.players[game.currentPlayerIndex]
+place_tile :: proc(game: ^Game, currentPlayerIndex: u8) {
+  player := &game.players[currentPlayerIndex]
   halfgridPos := get_tile_grid_pos(&game.tileGrid, rl.GetMousePosition())
   tile := get_tile(&game.tileGrid, halfgridPos)
-  activeTile, activeTileHalfgridPos := get_active_tile(&game.tileGrid)
+  activeTile, activeTileHalfgridPos := get_active_tile(&game.tileGrid, player)
   is_next, dir := next_to(halfgridPos, activeTileHalfgridPos)
 
   if !rl.IsMouseButtonPressed(.LEFT) {
@@ -657,17 +635,17 @@ place_tile :: proc(game: ^Game) {
 
   if player.selectedTileType == .Nuke && within_game_bounds(game, halfgridPos) && pay_active_tile_cost(player) && player.nukes > 0 {
     player.nukes -= 1
-    add_entity(game, halfgridPos, SimulationEntity {
+    add_entity(game, currentPlayerIndex, halfgridPos, SimulationEntity {
       damage = 2
     }, EntityType.Nuke)
   }
   
   if player.selectedTileType == .MortarTarget && within_game_bounds(game, halfgridPos) && pay_active_tile_cost(player) {
-    add_entity(game, halfgridPos, SimulationEntity {
+    add_entity(game, currentPlayerIndex, halfgridPos, SimulationEntity {
       damage = activeTile.damage
     }, EntityType.MortarShot)
 
-    game.tileGrid.activeTileId = 0
+    player.activeTileId = 0
     player.editMode = .Clicking
   }
    
@@ -676,7 +654,7 @@ place_tile :: proc(game: ^Game) {
     fwd_pos := get_screen_position(&game.tileGrid, activeTileHalfgridPos - directions[dir])
     vel := (fwd_pos - pos)
 
-    add_entity(game, halfgridPos, SimulationEntity {
+    add_entity(game, currentPlayerIndex, halfgridPos, SimulationEntity {
       shot = Shot {
         velocity = vel * CANNONBALL_SPEED,
         position = fwd_pos + (pos - fwd_pos) * 0.25
@@ -684,28 +662,28 @@ place_tile :: proc(game: ^Game) {
       damage = 1
     }, EntityType.Shot)
 
-    game.tileGrid.activeTileId = 0
+    player.activeTileId = 0
     player.editMode = .Clicking
 
     return
   }
 
-  if player.selectedTileType != .Land && (tile.type != .Land || tile.playerIndex != game.currentPlayerIndex) {
+  if player.selectedTileType != .Land && (tile.type != .Land || tile.playerIndex != currentPlayerIndex) {
     return 
   }
 
-  next_to_own_territory :: proc(game: ^Game, tile: ^Tile) -> bool {
-    player := &game.players[game.currentPlayerIndex]
-    return tile.playerIndex == game.currentPlayerIndex && tile.type != .Blocked && tile.type != .Free
+  next_to_own_territory :: proc(game: ^Game, currentPlayerIndex: u8, tile: ^Tile) -> bool {
+    player := &game.players[currentPlayerIndex]
+    return tile.playerIndex == currentPlayerIndex && tile.type != .Blocked && tile.type != .Free
   }
 
-  if !test_adjacent_cell(game, halfgridPos, next_to_own_territory) && player.selectedTileType == .Land {
+  if !test_adjacent_cell(game, currentPlayerIndex, halfgridPos, next_to_own_territory) && player.selectedTileType == .Land {
     return
   } 
 
   if pay_active_tile_cost(player) {
     tile.visibility = .Invisible
-    tile.playerIndex = game.currentPlayerIndex
+    tile.playerIndex = currentPlayerIndex
     tile.type = player.selectedTileType
 
     if player.selectedTileType == .Shield {
@@ -730,40 +708,42 @@ place_tile :: proc(game: ^Game) {
   }   
 }
 
-start_next_turn :: proc (game: ^Game) {
-  if game.order {
-    game.currentPlayerIndex += 1
+start_next_turn :: proc (game: ^Game, currentPlayerIndex: u32) {
+  //BIG TODO
 
-    if game.currentPlayerIndex == game.playerCount {
-      game.currentPlayerIndex = game.playerCount - 1
-      game.state = .BetweenRounds
-      game.order = !game.order
-  
-      game.rounds += 1
-    }
-  } else {
-    if game.currentPlayerIndex == 0 {
-      game.currentPlayerIndex = 1
-      game.state = .BetweenRounds
-      game.order = !game.order
-      
-      game.rounds += 1
-    }
+  //if game.order {
+  //  currentPlayerIndex += 1
 
-    game.currentPlayerIndex -= 1  
-  }
+  //  if currentPlayerIndex == game.playerCount {
+  //    currentPlayerIndex = game.playerCount - 1
+  //    game.state = .BetweenRounds
+  //    game.order = !game.order
+  //
+  //    game.rounds += 1
+  //  }
+  //} else {
+  //  if currentPlayerIndex == 0 {
+  //    currentPlayerIndex = 1
+  //    game.state = .BetweenRounds
+  //    game.order = !game.order
+  //    
+  //    game.rounds += 1
+  //  }
 
-  game.tileGrid.activeTileId = 0
-  player := &game.players[game.currentPlayerIndex]
-  player.energy = 3
+  //  currentPlayerIndex -= 1  
+  //}
+
+  //game.tileGrid.activeTileId = 0
+  //player := &game.players[currentPlayerIndex]
+  //player.energy = 3
 }
 
-ui_layout :: proc(game: ^Game) {
+ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
   ui := &game.ui
   // ui buttonstrip
   row_layout(ui, .Right, {10, 10}, 10)
   
-  player := &game.players[game.currentPlayerIndex]
+  player := &game.players[currentPlayerIndex]
 
   if (button(ui, rl.Rectangle {
     width = 100,
@@ -830,7 +810,8 @@ ui_layout :: proc(game: ^Game) {
     width = 150,
     height = 75,
   }, "end turn", player.color)) {
-    start_next_turn(game)
+    //BIG TODO
+    //start_next_turn(game)
   }
  
   text_display(ui, rl.Rectangle {
@@ -965,11 +946,11 @@ simulate :: proc(game: ^Game, dt: f32) {
   }
 }
 
-update_game :: proc(game: ^Game, dt: f32) {
-    player := &game.players[game.currentPlayerIndex]
+update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
+    player := &game.players[currentPlayerIndex]
  
     update_tilegrid_offset(&game.tileGrid)
-    render_gameboard(game)
+    render_gameboard(game, currentPlayerIndex)
 
     switch game.state {
       case .Paused:
@@ -1014,12 +995,12 @@ update_game :: proc(game: ^Game, dt: f32) {
 
         switch player.editMode {
           case .Placing:
-            place_tile(game)
+            place_tile(game, currentPlayerIndex)
           case .Clicking:
-            click_tile(game)
+            click_tile(game, currentPlayerIndex)
         }    
 
-        ui_layout(game)
+        ui_layout(game, currentPlayerIndex)
         hover_tilegrid(&game.tileGrid, player, &game.ui)
     }    
 }
@@ -1031,22 +1012,94 @@ AppState :: enum {
 
 App :: struct {
   network: Network,
-  game: Game,
+  gameInstance: Game,
+  inputStates: [MAX_PLAYERS]InputState,
+  playerNames: [MAX_PLAYERS]string,
   state: AppState,
+  playerCount: u8,
+  playerIndex: u8,
+}
+
+MouseState :: enum {
+  Down,
+  Pressed,
+  Up,
+  None,
+}
+
+InputState :: struct {
+  mousePos: la.Vector2f32,
+  screenSize: la.Vector2f32,
+  leftButton: MouseState,
 }
 
 init_app :: proc(app: ^App) {
-  game: Game
-  init_game(&app.game)
   init_network(&app.network)
+}
+
+init_game :: proc(app: ^App, playerNames: []string) {
+  for i in 0..<app.network.lobby.client_count {
+    client := &app.network.lobby.clients[i]
+    app.playerNames[i] = string(client.name_buf[:client.name_len])
+  }
+
+  app.playerCount = app.network.lobby.client_count
+  app.playerIndex = get_client_player_idx(&app.network)
+
+  app.gameInstance = Game {
+    playerCount = u8(len(playerNames)),
+  }
+
+  for playerName, i in playerNames {
+    app.gameInstance.players[i] = Player {
+      color = playerColors[i],
+      username = playerNames[i],
+      nukes = 1,
+      selectedTileType = .Land,
+    }
+  }
+
+  init_tilegrid(&app.gameInstance.tileGrid, &app.gameInstance.ui)
+}
+
+get_button_state :: proc() -> MouseState {
+  if rl.IsMouseButtonDown(.LEFT) {
+    return .Down
+  }
+  
+  if rl.IsMouseButtonPressed(.LEFT) {
+    return .Pressed
+  }
+  
+  if rl.IsMouseButtonUp(.LEFT) {
+    return .Up
+  }
+
+  return .None
 }
 
 update_app :: proc(app: ^App, dt: f32) {
   switch app.state {
   case .Playing:
-    update_game(&app.game, dt)
+    for i in 0..<app.playerCount {
+      if i == app.playerIndex {
+        app.inputStates[i] = InputState {
+          mousePos = rl.GetMousePosition(),
+          leftButton = get_button_state(),
+          screenSize = la.Vector2f32{f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())}, 
+        }
+      } else {
+      }
+      
+      update_game(&app.gameInstance, dt, u8(i))
+    }
   case .Connecting:
-    update_network(&app.network, &app.state)
+    update_network(&app.network)
+    
+    if app.network.state == .Connected {
+      app.state = .Playing
+      init_game(app, app.playerNames[:app.playerCount])
+    }
   }
 }
 

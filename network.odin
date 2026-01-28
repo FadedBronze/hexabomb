@@ -11,7 +11,6 @@ import "core:encoding/endian"
 import rl "vendor:raylib"
 import la "core:math/linalg"
 
-MAX_CLIENTS :: 4
 MAX_LOBBIES :: 4
 DISCOVERY_PORTS := [3]int{4000, 4001, 4002}
 MAX_NAME_CHARS :: 32
@@ -36,7 +35,7 @@ Lobby :: struct {
   name_buf: [MAX_NAME_CHARS]u8,
   creatorIdx: u8,
   client_count: u8,
-  clients: [MAX_NAME_CHARS]Client,
+  clients: [MAX_PLAYERS]Client,
 }
 
 LobbyEntry :: struct {
@@ -49,6 +48,7 @@ NetworkState :: enum {
   Connecting,
   WaitingForLobbyInfo,
   InLobby,
+  Connected,
 }
 
 Network :: struct {
@@ -143,6 +143,19 @@ create_lobby :: proc(network: ^Network, name: string) {
   }
 
   broadcast_my_lobby_entry(network)
+}
+
+get_client_player_idx :: proc(network: ^Network) -> u8 {
+  // in an actual lobby
+  assert(network.lobby.client_count != 0)
+
+  for client, i in network.lobby.clients[:network.lobby.client_count] {
+    if client.endpoint == network.myEndpoint {
+      return u8(i)
+    }
+  }
+
+  return MAX_PLAYERS
 }
 
 broadcast_my_lobby_entry :: proc(network: ^Network) {
@@ -352,7 +365,7 @@ recieve_discovery_messages :: proc(network: ^Network) {
   }
 }
 
-recieve_messages :: proc(network: ^Network, appState: ^AppState) {
+recieve_messages :: proc(network: ^Network) {
   buf: [1024]u8
   length, endpoint, err := net.recv_udp(network.socket, buf[:])
 
@@ -372,7 +385,7 @@ recieve_messages :: proc(network: ^Network, appState: ^AppState) {
     }
   case LOBBY_STARTGAME_PREFIX:
     if network.state == .InLobby {
-      appState^ = .Playing
+      network.state = .Connected
     }
   }
 }
@@ -433,16 +446,17 @@ broadcast_input_state :: proc(network: ^Network) {
   rl.IsMouseButtonPressed(.LEFT)
 }
 
-update_network :: proc(network: ^Network, appState: ^AppState) {
+update_network :: proc(network: ^Network) {
   switch network.state {
+    case .Connected:
     case .WaitingForLobbyInfo:
-      recieve_messages(network, appState)
+      recieve_messages(network)
 
       rl.DrawRectangle(0, 0, rl.GetScreenWidth(), rl.GetScreenHeight(), rl.Color{
         0, 0, 0, 150
       })
     case .InLobby:
-      recieve_messages(network, appState)
+      recieve_messages(network)
 
       rl.DrawRectangle(0, 0, rl.GetScreenWidth(), rl.GetScreenHeight(), rl.Color{
         0, 0, 0, 150
