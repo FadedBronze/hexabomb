@@ -403,12 +403,16 @@ receive_input_state :: proc(network: ^Network, endpoint: net.Endpoint, payload: 
   network.lobby.inputStates[player] = inputState
 }
 
-broadcast_input_state :: proc(network: ^Network) {
-  buf: [9]u8
-  encodeInputState(get_input_state(), buf[:])
+broadcast_input_state :: proc(network: ^Network, inputState: ^InputState) {
+  buf: [17]u8
+  encodeInputState(inputState, buf[:])
 
   for i in 0..<network.lobby.client_count {
     client := &network.lobby.clients[i]
+
+    if client.endpoint == network.myEndpoint {
+      continue
+    }
   
     _, err := net.send_udp(network.socket, buf[:], client.endpoint)
     if err != nil {
@@ -467,39 +471,39 @@ broadcast_game_start :: proc(network: ^Network) {
   }
 }
 
-encodeInputState :: proc(state: InputState, buf: []u8) -> (length: u16) {
+encodeInputState :: proc(state: ^InputState, buf: []u8) -> (length: u16) {
   assert(len(buf) >= 9)
 
-  endian.put_f32(buf[0:2], .Big, state.mousePos.x)
-  endian.put_f32(buf[2:4], .Big, state.mousePos.y)
+  endian.put_f32(buf[0:4], .Big, state.mousePos.x)
+  endian.put_f32(buf[4:8], .Big, state.mousePos.y)
 
-  endian.put_f32(buf[4:6], .Big, state.screenSize.x)
-  endian.put_f32(buf[6:8], .Big, state.screenSize.y)
+  endian.put_f32(buf[8:12], .Big, state.screenSize.x)
+  endian.put_f32(buf[12:16], .Big, state.screenSize.y)
 
-  buf[8] = u8(state.leftButton)
+  buf[16] = u8(state.leftButton)
 
-  return 9
+  return 17
 }
 
 decodeInputState :: proc(payload: []u8) -> (state: InputState) {
   ok: bool
-  state.mousePos.x, ok = endian.get_f32(payload[0:2], .Big)
+  state.mousePos.x, ok = endian.get_f32(payload[0:4], .Big)
   assert(ok)
-  state.mousePos.y, ok = endian.get_f32(payload[2:4], .Big)
+  state.mousePos.y, ok = endian.get_f32(payload[4:8], .Big)
   assert(ok)
-  state.screenSize.x, ok = endian.get_f32(payload[4:6], .Big)
+  state.screenSize.x, ok = endian.get_f32(payload[8:12], .Big)
   assert(ok)
-  state.screenSize.y, ok = endian.get_f32(payload[6:8], .Big)
+  state.screenSize.y, ok = endian.get_f32(payload[12:16], .Big)
   assert(ok)
-  state.leftButton = MouseState(payload[8])
+  state.leftButton = MouseState(payload[16])
   return state
 }
 
-update_network :: proc(network: ^Network) {
+update_network :: proc(network: ^Network, inputState: ^InputState) {
   switch network.state {
     case .Connected:
       recieve_messages(network)
-      broadcast_input_state(network)
+      broadcast_input_state(network, inputState)
     case .WaitingForLobbyInfo:
       recieve_messages(network)
 
@@ -522,7 +526,7 @@ update_network :: proc(network: ^Network) {
         broadcast_my_lobby_entry(network)
         recieve_discovery_messages(network)
 
-        start := button(&network.ui, rl.Rectangle{
+        start := button(&network.ui, inputState, rl.Rectangle{
           x = f32(rl.GetScreenWidth())/2 - 75,
           y = f32(rl.GetScreenHeight())/2 - 75,
           width = 150,
@@ -547,7 +551,7 @@ update_network :: proc(network: ^Network) {
 
       lobby_count := network.lobbyEntryCount 
 
-      if button(&network.ui, rl.Rectangle{
+      if button(&network.ui, inputState, rl.Rectangle{
         width = 150,
         height = 50,
       }, lobby_count > 0 ? fmt_lobby_name(&network.lobbyEntries[0]) : "--", rl.GRAY) {
@@ -555,7 +559,7 @@ update_network :: proc(network: ^Network) {
         network.state = .WaitingForLobbyInfo
       }
       
-      if button(&network.ui, rl.Rectangle{
+      if button(&network.ui, inputState, rl.Rectangle{
         width = 150,
         height = 50,
       }, lobby_count > 1 ? fmt_lobby_name(&network.lobbyEntries[1]) : "--", rl.GRAY) {
@@ -563,7 +567,7 @@ update_network :: proc(network: ^Network) {
         network.state = .WaitingForLobbyInfo
       }
       
-      if button(&network.ui, rl.Rectangle{
+      if button(&network.ui, inputState, rl.Rectangle{
         width = 150,
         height = 50,
       }, lobby_count > 2 ? fmt_lobby_name(&network.lobbyEntries[2]) : "--", rl.GRAY) {
@@ -571,7 +575,7 @@ update_network :: proc(network: ^Network) {
         network.state = .WaitingForLobbyInfo
       }
       
-      if button(&network.ui, rl.Rectangle{
+      if button(&network.ui, inputState, rl.Rectangle{
         width = 150,
         height = 50,
       }, lobby_count > 3 ? fmt_lobby_name(&network.lobbyEntries[3]) : "--", rl.GRAY) {
@@ -579,7 +583,7 @@ update_network :: proc(network: ^Network) {
         network.state = .WaitingForLobbyInfo
       }
       
-      create_room := button(&network.ui, rl.Rectangle{
+      create_room := button(&network.ui, inputState, rl.Rectangle{
         width = 150,
         height = 50,
       }, "create room", rl.GRAY)

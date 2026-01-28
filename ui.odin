@@ -79,7 +79,7 @@ update_layout :: proc(ui: ^UI, rectangle: ^rl.Rectangle) {
   }
 }
 
-button :: proc(ui: ^UI, rectangle: rl.Rectangle, text: string, color: rl.Color, id := #caller_location) -> bool {
+button :: proc(ui: ^UI, inputState: ^InputState, rectangle: rl.Rectangle, text: string, color: rl.Color, id := #caller_location) -> bool {
   rectangle := rectangle
 
   update_layout(ui, &rectangle)
@@ -90,7 +90,7 @@ button :: proc(ui: ^UI, rectangle: rl.Rectangle, text: string, color: rl.Color, 
   if !ui.virtual {
     rl.DrawRectangleRec(rectangle, col)
   }
-  within_button := within_rectangle(rectangle, rl.GetMousePosition())
+  within_button := within_rectangle(rectangle, inputState.mousePos)
   mouse_down := rl.IsMouseButtonDown(.LEFT)
 
   if within_button {
