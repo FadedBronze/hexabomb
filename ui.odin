@@ -54,7 +54,6 @@ within_rectangle :: proc(rect: rl.Rectangle, pos: la.Vector2f32) -> bool {
   return pos.x < rect.x + rect.width && pos.x > rect.x && pos.y < rect.y + rect.height && pos.y > rect.y
 }
 
-
 update_layout :: proc(ui: ^UI, rectangle: ^rl.Rectangle) {
   #partial switch &layout in &ui.active_layout {
   case RowLayout: 
@@ -88,7 +87,9 @@ button :: proc(ui: ^UI, rectangle: rl.Rectangle, text: string, color: rl.Color, 
   col := color / rl.Color { 2, 2, 2, 1 } + rl.Color{255, 255, 255, 0} / 2
   col2 := color / rl.Color { 3, 3, 3, 1 } + rl.Color{255, 255, 255, 0} / 3 * 2
 
-  rl.DrawRectangleRec(rectangle, col)
+  if !ui.virtual {
+    rl.DrawRectangleRec(rectangle, col)
+  }
   within_button := within_rectangle(rectangle, rl.GetMousePosition())
   mouse_down := rl.IsMouseButtonDown(.LEFT)
 
@@ -96,7 +97,9 @@ button :: proc(ui: ^UI, rectangle: rl.Rectangle, text: string, color: rl.Color, 
     ui.activeId = id
 
     if mouse_down {
-      rl.DrawRectangleRec(rectangle, col2)
+      if !ui.virtual {
+        rl.DrawRectangleRec(rectangle, col2)
+      }
     }
   }
 
@@ -107,7 +110,9 @@ button :: proc(ui: ^UI, rectangle: rl.Rectangle, text: string, color: rl.Color, 
   pressed := false
 
   if id == ui.activeId {
-    rl.DrawRectangleLines(i32(rectangle.x), i32(rectangle.y), i32(rectangle.width), i32(rectangle.height), rl.BLACK)
+    if !ui.virtual {
+      rl.DrawRectangleLines(i32(rectangle.x), i32(rectangle.y), i32(rectangle.width), i32(rectangle.height), rl.BLACK)
+    }
     pressed = rl.IsMouseButtonPressed(.LEFT)
   }
 
@@ -115,7 +120,9 @@ button :: proc(ui: ^UI, rectangle: rl.Rectangle, text: string, color: rl.Color, 
 
   text_width := rl.MeasureText(str, BUTTON_FONT_SIZE)
 
-  rl.DrawText(str, i32(rectangle.x + rectangle.width/2) - i32(text_width)/2, i32(rectangle.y + rectangle.height/2) - BUTTON_FONT_SIZE/2, BUTTON_FONT_SIZE, rl.BLACK)
+  if !ui.virtual {
+    rl.DrawText(str, i32(rectangle.x + rectangle.width/2) - i32(text_width)/2, i32(rectangle.y + rectangle.height/2) - BUTTON_FONT_SIZE/2, BUTTON_FONT_SIZE, rl.BLACK)
+  }
 
   return pressed
 }
@@ -128,7 +135,10 @@ text_display :: proc(ui: ^UI, rectangle: rl.Rectangle, text: string, color: rl.C
   str := strings.unsafe_string_to_cstring(strings.concatenate({text, "\x00"}))
 
   text_width := rl.MeasureText(str, BUTTON_FONT_SIZE)
-  rl.DrawText(str, i32(rectangle.x + rectangle.width/2) - i32(text_width)/2, i32(rectangle.y + rectangle.height/2) - BUTTON_FONT_SIZE/2, BUTTON_FONT_SIZE, color)
+
+  if !ui.virtual {
+    rl.DrawText(str, i32(rectangle.x + rectangle.width/2) - i32(text_width)/2, i32(rectangle.y + rectangle.height/2) - BUTTON_FONT_SIZE/2, BUTTON_FONT_SIZE, color)
+  }
 }
 
 empty_id :: proc() -> rn.Source_Code_Location {

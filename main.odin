@@ -326,10 +326,15 @@ get_active_tile :: proc(tilegrid: ^TileGrid, player: ^Player) -> (^Tile, HalfGri
   return &tilegrid.tiles[idx], HalfGridPosition{i16(x)-HALF_MAX_GRID_SIZE, i16(y)-HALF_MAX_GRID_SIZE}
 }
 
-hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player, ui: ^UI, id := #caller_location) {
+hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player, ui: ^UI, virtual: bool, id := #caller_location) {
   if ui.activeId == empty_id() {
     ui.activeId = id
   }
+  
+  if virtual {
+    return
+  }
+
   if ui.activeId != id {
     return
   }
@@ -946,63 +951,66 @@ simulate :: proc(game: ^Game, dt: f32) {
   }
 }
 
-update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
-    player := &game.players[currentPlayerIndex]
- 
-    update_tilegrid_offset(&game.tileGrid)
+update_game :: proc(game: ^Game, inputState: ^InputState, dt: f32, currentPlayerIndex: u8, virtual: bool) {
+  player := &game.players[currentPlayerIndex]
+
+  update_tilegrid_offset(&game.tileGrid)
+
+  if !virtual {
     render_gameboard(game, currentPlayerIndex)
+  }
 
-    switch game.state {
-      case .Paused:
-        play := button(&game.ui, rl.Rectangle{
-          x = f32(rl.GetScreenWidth())/2 - 75,
-          y = f32(rl.GetScreenHeight())/2 - 75,
-          width = 150,
-          height = 150,
-        }, "play", rl.GRAY)
+  switch game.state {
+  case .Paused:
+    play := button(&game.ui, rl.Rectangle{
+      x = f32(rl.GetScreenWidth())/2 - 75,
+      y = f32(rl.GetScreenHeight())/2 - 75,
+      width = 150,
+      height = 150,
+    }, "play", rl.GRAY)
 
-        if rl.IsKeyPressed(.P) || play {
-          game.state = .Playing
-        }
-      case .PostSimulate:
-        start := button(&game.ui, rl.Rectangle{
-          x = f32(rl.GetScreenWidth())/2 - 75,
-          y = f32(rl.GetScreenHeight())/2 - 75,
-          width = 150,
-          height = 150,
-        }, "continue", rl.GRAY)
+    if rl.IsKeyPressed(.P) || play {
+      game.state = .Playing
+    }
+  case .PostSimulate:
+    start := button(&game.ui, rl.Rectangle{
+      x = f32(rl.GetScreenWidth())/2 - 75,
+      y = f32(rl.GetScreenHeight())/2 - 75,
+      width = 150,
+      height = 150,
+    }, "continue", rl.GRAY)
 
-        if start {
-          game.state = .Playing
-        }
-      case .BetweenRounds:
-        start := button(&game.ui, rl.Rectangle{
-          x = f32(rl.GetScreenWidth())/2 - 75,
-          y = f32(rl.GetScreenHeight())/2 - 75,
-          width = 150,
-          height = 150,
-        }, "start", rl.GRAY)
+    if start {
+      game.state = .Playing
+    }
+  case .BetweenRounds:
+    start := button(&game.ui, rl.Rectangle{
+      x = f32(rl.GetScreenWidth())/2 - 75,
+      y = f32(rl.GetScreenHeight())/2 - 75,
+      width = 150,
+      height = 150,
+    }, "start", rl.GRAY)
 
-        if start {
-          game.state = .Simulate
-        }
-      case .Simulate:
-        simulate(game, dt)
-      case .Playing:
-        if rl.IsKeyPressed(.P) {
-          game.state = .Paused
-        }
+    if start {
+      game.state = .Simulate
+    }
+  case .Simulate:
+    simulate(game, dt)
+  case .Playing:
+    if rl.IsKeyPressed(.P) {
+      game.state = .Paused
+    }
 
-        switch player.editMode {
-          case .Placing:
-            place_tile(game, currentPlayerIndex)
-          case .Clicking:
-            click_tile(game, currentPlayerIndex)
-        }    
-
-        ui_layout(game, currentPlayerIndex)
-        hover_tilegrid(&game.tileGrid, player, &game.ui)
+    switch player.editMode {
+      case .Placing:
+        place_tile(game, currentPlayerIndex)
+      case .Clicking:
+        click_tile(game, currentPlayerIndex)
     }    
+
+    ui_layout(game, currentPlayerIndex)
+    hover_tilegrid(&game.tileGrid, player, &game.ui, virtual)
+  }    
 }
 
 AppState :: enum {
@@ -1013,7 +1021,6 @@ AppState :: enum {
 App :: struct {
   network: Network,
   gameInstance: Game,
-  inputStates: [MAX_PLAYERS]InputState,
   playerNames: [MAX_PLAYERS]string,
   state: AppState,
   playerCount: u8,
@@ -1078,20 +1085,23 @@ get_button_state :: proc() -> MouseState {
   return .None
 }
 
+get_input_state :: proc() -> InputState {
+  return InputState {
+    mousePos = rl.GetMousePosition(),
+    leftButton = get_button_state(),
+    screenSize = la.Vector2f32{f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())}, 
+  }
+}
+
 update_app :: proc(app: ^App, dt: f32) {
   switch app.state {
   case .Playing:
     for i in 0..<app.playerCount {
-      if i == app.playerIndex {
-        app.inputStates[i] = InputState {
-          mousePos = rl.GetMousePosition(),
-          leftButton = get_button_state(),
-          screenSize = la.Vector2f32{f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())}, 
-        }
-      } else {
-      }
+      virtual := i != app.playerIndex
+      virtual = true
       
-      update_game(&app.gameInstance, dt, u8(i))
+      app.gameInstance.ui.virtual = virtual
+      update_game(&app.gameInstance, &app.network.lobby.inputStates[i], dt, u8(i), virtual)
     }
   case .Connecting:
     update_network(&app.network)

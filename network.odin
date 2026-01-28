@@ -19,6 +19,7 @@ LOBBY_INFO_PREFIX ::      "HXBLBINF_"
 LOBBY_JOIN_PREFIX ::      "HXBLJOIN_"
 LOBBY_ENTRY_PREFIX ::     "HXBENTRY_"
 LOBBY_STARTGAME_PREFIX :: "HXBSTARG_"
+INPUTSTATE_PREFIX ::      "HXBINPUT_"
 PREFIX_SIZE :: len(LOBBY_INFO_PREFIX)
 
 LOCAL_IP := net.IP4_Address{127, 0, 0, 1}
@@ -27,7 +28,7 @@ BROADCAST_IP := LOCAL_IP
 Client :: struct {
   endpoint: net.Endpoint,
   name_len: u8,
-  name_buf: [MAX_NAME_CHARS]u8
+  name_buf: [MAX_NAME_CHARS]u8,
 }
 
 Lobby :: struct {
@@ -36,6 +37,7 @@ Lobby :: struct {
   creatorIdx: u8,
   client_count: u8,
   clients: [MAX_PLAYERS]Client,
+  inputStates: [MAX_PLAYERS]InputState,
 }
 
 LobbyEntry :: struct {
@@ -146,9 +148,11 @@ create_lobby :: proc(network: ^Network, name: string) {
 }
 
 get_client_player_idx :: proc(network: ^Network) -> u8 {
-  // in an actual lobby
   assert(network.lobby.client_count != 0)
+  return get_endpoint_player_idx(network, network.myEndpoint)
+}
 
+get_endpoint_player_idx :: proc(network: ^Network, endpoint: net.Endpoint) -> u8 {
   for client, i in network.lobby.clients[:network.lobby.client_count] {
     if client.endpoint == network.myEndpoint {
       return u8(i)
@@ -387,6 +391,29 @@ recieve_messages :: proc(network: ^Network) {
     if network.state == .InLobby {
       network.state = .Connected
     }
+  case INPUTSTATE_PREFIX:
+    receive_input_state(network, endpoint, buf[PREFIX_SIZE:])
+  }
+}
+
+receive_input_state :: proc(network: ^Network, endpoint: net.Endpoint, payload: []u8) {
+  inputState := decodeInputState(payload)
+  player := get_endpoint_player_idx(network, endpoint)
+  assert(player < MAX_PLAYERS)
+  network.lobby.inputStates[player] = inputState
+}
+
+broadcast_input_state :: proc(network: ^Network) {
+  buf: [9]u8
+  encodeInputState(get_input_state(), buf[:])
+
+  for i in 0..<network.lobby.client_count {
+    client := &network.lobby.clients[i]
+  
+    _, err := net.send_udp(network.socket, buf[:], client.endpoint)
+    if err != nil {
+      fmt.println(err)
+    }
   }
 }
 
@@ -440,15 +467,39 @@ broadcast_game_start :: proc(network: ^Network) {
   }
 }
 
-broadcast_input_state :: proc(network: ^Network) {
-  rl.GetMousePosition()
-  rl.IsMouseButtonDown(.LEFT)
-  rl.IsMouseButtonPressed(.LEFT)
+encodeInputState :: proc(state: InputState, buf: []u8) -> (length: u16) {
+  assert(len(buf) >= 9)
+
+  endian.put_f32(buf[0:2], .Big, state.mousePos.x)
+  endian.put_f32(buf[2:4], .Big, state.mousePos.y)
+
+  endian.put_f32(buf[4:6], .Big, state.screenSize.x)
+  endian.put_f32(buf[6:8], .Big, state.screenSize.y)
+
+  buf[8] = u8(state.leftButton)
+
+  return 9
+}
+
+decodeInputState :: proc(payload: []u8) -> (state: InputState) {
+  ok: bool
+  state.mousePos.x, ok = endian.get_f32(payload[0:2], .Big)
+  assert(ok)
+  state.mousePos.y, ok = endian.get_f32(payload[2:4], .Big)
+  assert(ok)
+  state.screenSize.x, ok = endian.get_f32(payload[4:6], .Big)
+  assert(ok)
+  state.screenSize.y, ok = endian.get_f32(payload[6:8], .Big)
+  assert(ok)
+  state.leftButton = MouseState(payload[8])
+  return state
 }
 
 update_network :: proc(network: ^Network) {
   switch network.state {
     case .Connected:
+      recieve_messages(network)
+      broadcast_input_state(network)
     case .WaitingForLobbyInfo:
       recieve_messages(network)
 
