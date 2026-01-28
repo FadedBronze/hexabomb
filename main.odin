@@ -235,8 +235,12 @@ SimulationEntity :: struct {
 }
 
 GameState :: enum {
+  //Network
   Connecting,
+  WaitingForLobbyInfo,
   InLobby,
+
+  //Gameplay
   Playing,
   BetweenRounds,
   Simulate,
@@ -973,44 +977,64 @@ update_game :: proc(game: ^Game, dt: f32) {
     update_tilegrid_offset(&game.tileGrid)
     render_gameboard(game)
 
+    recieve_discovery_messages(&game.network, game.state)
+
     switch game.state {
+      case .WaitingForLobbyInfo:
+        rl.DrawRectangle(0, 0, rl.GetScreenWidth(), rl.GetScreenHeight(), rl.Color{
+          0, 0, 0, 150
+        })
       case .InLobby:
+        rl.DrawRectangle(0, 0, rl.GetScreenWidth(), rl.GetScreenHeight(), rl.Color{
+          0, 0, 0, 150
+        })
+
         if client_is_lobby_master(&game.network) {
-          broadcast_my_lobby_name(&game.network)
+          broadcast_my_lobby_entry(&game.network)
         }
       case .Connecting:
         rl.DrawRectangle(0, 0, rl.GetScreenWidth(), rl.GetScreenHeight(), rl.Color{
           0, 0, 0, 150
         })
 
-        retrieve_lobby_entries(&game.network)
-
         row_layout(&game.ui, .Up, la.Vector2f32{
           f32(rl.GetScreenWidth())/2 - 75,
           f32(rl.GetScreenHeight())/2 - 75,
         }, 10)
 
-        lobby_count := game.network.lobbyEntryCount
+        lobby_count := game.network.lobbyEntryCount 
 
-        room1 := button(&game.ui, rl.Rectangle{
+        if button(&game.ui, rl.Rectangle{
           width = 150,
           height = 50,
-        }, lobby_count > 0 ? fmt_lobby_name(&game.network.lobbyEntries[0]) : "--", rl.GRAY)
+        }, lobby_count > 0 ? fmt_lobby_name(&game.network.lobbyEntries[0]) : "--", rl.GRAY) {
+          request_join_lobby(&game.network, game.network.lobbyEntries[0].endpoint)
+          game.state = .WaitingForLobbyInfo
+        }
         
-        room2 := button(&game.ui, rl.Rectangle{
+        if button(&game.ui, rl.Rectangle{
           width = 150,
           height = 50,
-        }, lobby_count > 1 ? fmt_lobby_name(&game.network.lobbyEntries[1]) : "--", rl.GRAY)
+        }, lobby_count > 1 ? fmt_lobby_name(&game.network.lobbyEntries[1]) : "--", rl.GRAY) {
+          request_join_lobby(&game.network, game.network.lobbyEntries[1].endpoint)
+          game.state = .WaitingForLobbyInfo
+        }
         
-        room3 := button(&game.ui, rl.Rectangle{
+        if button(&game.ui, rl.Rectangle{
           width = 150,
           height = 50,
-        }, lobby_count > 2 ? fmt_lobby_name(&game.network.lobbyEntries[2]) : "--", rl.GRAY)
+        }, lobby_count > 2 ? fmt_lobby_name(&game.network.lobbyEntries[2]) : "--", rl.GRAY) {
+          request_join_lobby(&game.network, game.network.lobbyEntries[2].endpoint)
+          game.state = .WaitingForLobbyInfo
+        }
         
-        room4 := button(&game.ui, rl.Rectangle{
+        if button(&game.ui, rl.Rectangle{
           width = 150,
           height = 50,
-        }, lobby_count > 3 ? fmt_lobby_name(&game.network.lobbyEntries[3]) : "--", rl.GRAY)
+        }, lobby_count > 3 ? fmt_lobby_name(&game.network.lobbyEntries[3]) : "--", rl.GRAY) {
+          request_join_lobby(&game.network, game.network.lobbyEntries[3].endpoint)
+          game.state = .WaitingForLobbyInfo
+        }
         
         create_room := button(&game.ui, rl.Rectangle{
           width = 150,

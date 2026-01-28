@@ -6,29 +6,39 @@ import "core:os"
 import "core:strings"
 import "core:strconv"
 import "core:time"
+import "core:encoding/endian"
 
 MAX_CLIENTS :: 4
 MAX_LOBBIES :: 4
 DISCOVERY_PORTS := [3]int{4000, 4001, 4002}
+MAX_NAME_CHARS :: 32
+
+LOBBY_INFO_PREFIX ::  "HXBLBINF_"
+LOBBY_JOIN_PREFIX ::  "HXBLJOIN_"
+LOBBY_ENTRY_PREFIX :: "HXBENTRY_"
+PREFIX_SIZE :: len(LOBBY_INFO_PREFIX)
 
 LOCAL_IP := net.IP4_Address{127, 0, 0, 1}
 BROADCAST_IP := LOCAL_IP
 
 Client :: struct {
   endpoint: net.Endpoint,
+  name_len: u8,
+  name_buf: [MAX_NAME_CHARS]u8
 }
 
 Lobby :: struct {
-  name: string,
-  client_count: u8,
+  name_len: u8,
+  name_buf: [MAX_NAME_CHARS]u8,
   creatorIdx: u8,
-  clients: [MAX_CLIENTS]Client,
+  client_count: u8,
+  clients: [MAX_NAME_CHARS]Client,
 }
 
 LobbyEntry :: struct {
   endpoint: net.Endpoint,
-  name_buf: [32]u8,
-  name: string,
+  name_buf: [MAX_NAME_CHARS]u8,
+  name_len: u8,
 }
 
 Network :: struct {
@@ -112,17 +122,19 @@ create_lobby :: proc(network: ^Network, name: string) {
     creatorIdx = 0,
     client_count = 1,
     clients = {},
-    name = name,
+    name_len = u8(len(name)),
   }
+
+  copy_from_string(network.lobby.name_buf[0:len(name)], name)
   
   network.lobby.clients[0] = Client {
     endpoint = network.myEndpoint,
   }
 
-  broadcast_my_lobby_name(network)
+  broadcast_my_lobby_entry(network)
 }
 
-broadcast_my_lobby_name :: proc(network: ^Network) {
+broadcast_my_lobby_entry :: proc(network: ^Network) {
   assert(network.lobby.client_count != 0)
   assert(client_is_lobby_master(network))
 
@@ -132,11 +144,15 @@ broadcast_my_lobby_name :: proc(network: ^Network) {
 
     fmt.println("broadcasting")
 
-    payload := strings.concatenate({"HEXB_LOBBY_", network.lobby.name})
+    payload: [256]u8 
+
+    copy(payload[0:PREFIX_SIZE], LOBBY_ENTRY_PREFIX)
+    payload[PREFIX_SIZE] = network.lobby.name_len
+    copy(payload[PREFIX_SIZE+1:], network.lobby.name_buf[0:network.lobby.name_len])
 
     for DISCOVERY_PORT in DISCOVERY_PORTS {
       //TODO
-      net.send_udp(network.socket, transmute([]byte)payload, {
+      net.send_udp(network.discovery, payload[0:PREFIX_SIZE+1+network.lobby.name_len], {
         address = network.myEndpoint.address,
         port = DISCOVERY_PORT,
       })
@@ -145,53 +161,152 @@ broadcast_my_lobby_name :: proc(network: ^Network) {
 }
 
 request_join_lobby :: proc(network: ^Network, endpoint: net.Endpoint) {
-  payload := "HEXB_JOIN"
-  net.send_udp(network.socket, transmute([]byte)payload, endpoint)
+  payload := LOBBY_JOIN_PREFIX
+  net.send_udp(network.discovery, transmute([]byte)payload, endpoint)
+}
+
+recieve_messages :: proc(network: ^Network) {
+  buf: [1024]u8
+  length, endpoint, err := net.recv_udp(network.socket, buf[:])
+
+  if err != nil && err != .Would_Block {
+    fmt.println(err)
+    return
+  }
+
+  payload := strings.string_from_ptr(raw_data(buf[:]), PREFIX_SIZE)
+
+  master := !client_is_lobby_master(network)
 }
 
 fmt_lobby_name :: proc(lobby: ^LobbyEntry) -> string {
-  buf: [32]u8
-  str := strconv.itoa(buf[:], lobby.endpoint.port)
-  return strings.concatenate({net.address_to_string(lobby.endpoint.address), ":", str, " | ", lobby.name})
+  return strings.concatenate({net.endpoint_to_string(lobby.endpoint), " | ", transmute(string)lobby.name_buf[0:lobby.name_len]})
 }
 
 client_is_lobby_master :: proc(network: ^Network) -> bool {
   return network.lobby.clients[network.lobby.creatorIdx].endpoint == network.myEndpoint
 }
 
-//broadcast_my_lobby_info :: proc(network: ^Network) {
-//  lobby := &network.lobbies[network.myLobbyId-1]
-//
-//  for client in lobby.clients[0:lobby.client_count] {
-//    payload := lobby^
-//
-//    net.send_udp(network.socket, transmute([]byte)payload, client.endpoint)
-//  }
-//}
+lobby_to_bytes :: proc(lobby: ^Lobby, buf: []u8) -> u16 {
+  original_size := len(buf)
 
-retrieve_lobby_entries :: proc(network: ^Network) {
-  temp_buf: [32]u8 
+  buf := buf
+  buf[0] = lobby.name_len
+  buf = buf[1:]
+  copy_slice(buf[0:lobby.name_len], lobby.name_buf[0:lobby.name_len])
+  buf = buf[lobby.name_len:]
+  buf[0] = lobby.creatorIdx
+  buf[1] = lobby.client_count
+  buf = buf[2:]
 
-  if length, remote, err := net.recv_udp(network.discovery, temp_buf[:]); err == nil {
-    fmt.println("recieving")
+  for &client in lobby.clients[0:lobby.client_count] {
+    buf[0] = client.name_len
+    copy_slice(buf[1:client.name_len+1], client.name_buf[0:client.name_len])
+    buf = buf[client.name_len+1:]
+    size := encode_endpoint(client.endpoint, buf)
+    buf = buf[size:]
+  }
 
-    for lobbyEntry in network.lobbyEntries[0:network.lobbyEntryCount] {
-      if lobbyEntry.endpoint == remote {
-        return
-      }
+  return u16(original_size - len(buf))
+}
+
+encode_endpoint :: proc(endpoint: net.Endpoint, buf: []u8) -> u8 {
+  buf := buf
+  endian.put_u16(buf[0:2], .Big, u16(endpoint.port))
+  buf = buf[2:]
+
+  switch address in endpoint.address {
+  case net.IP4_Address:
+    buf[0] = 4
+    buf = buf[1:]
+
+    endian.put_u32(buf[0:4], .Big, transmute(u32)address)
+
+    return 2 + 1 + 4
+  case net.IP6_Address:
+    buf[0] = 16
+    buf = buf[1:]
+
+    bytes := transmute([16]u8)address
+    copy_slice(buf[0:16], bytes[:])
+    
+    return 2 + 1 + 16
+  }
+
+  unreachable()
+}
+
+retrieve_lobby_entries :: proc(network: ^Network, endpoint: net.Endpoint, payload: []u8) {
+  for lobbyEntry in network.lobbyEntries[0:network.lobbyEntryCount] {
+    if lobbyEntry.endpoint == endpoint {
+      return
     }
+  }
 
-    lobby := &network.lobbyEntries[network.lobbyEntryCount]
-    lobby.name_buf = temp_buf
+  lobby := &network.lobbyEntries[network.lobbyEntryCount]
 
-    payload := strings.string_from_ptr(raw_data(lobby.name_buf[:]), length)
-    name := strings.trim_prefix(payload, "HEXB_LOBBY_")
+  copy(lobby.name_buf[:], payload[1:payload[0]+1])
+  lobby.name_len = payload[0]
+  lobby.endpoint = endpoint
 
-    lobby.name = name
-    lobby.endpoint = remote
+  network.lobbyEntryCount += 1
+}
 
-    network.lobbyEntryCount += 1
-  } else if err != .Would_Block {
-    fmt.println(err)
+recieve_discovery_messages :: proc(network: ^Network, gameState: GameState) {
+  buf: [1024]u8
+  length, endpoint, err := net.recv_udp(network.discovery, buf[:])
+
+  if err != nil {
+    if err != .Would_Block {
+      fmt.println(err)
+    }
+    return
+  }
+
+  payload := strings.string_from_ptr(raw_data(buf[:]), PREFIX_SIZE)
+
+  master := client_is_lobby_master(network)
+
+  switch payload {
+  case LOBBY_INFO_PREFIX:
+    if !master && gameState == .WaitingForLobbyInfo {
+      accept_lobby_info(network, endpoint, buf[PREFIX_SIZE:])
+    }
+  case LOBBY_JOIN_PREFIX:
+    if master && gameState == .InLobby {
+      accept_join_lobby(network, endpoint)
+    }
+  case LOBBY_ENTRY_PREFIX:
+    if gameState == .Connecting {
+      retrieve_lobby_entries(network, endpoint, buf[PREFIX_SIZE:])
+    }
+  }
+}
+
+accept_lobby_info :: proc(network: ^Network, endpoint: net.Endpoint, payload: []u8){
+  fmt.println("accepted", payload)
+}
+
+accept_join_lobby :: proc(network: ^Network, endpoint: net.Endpoint) {
+  network.lobby.clients[network.lobby.client_count] = Client {
+    endpoint = endpoint,
+  }
+  network.lobby.client_count += 1
+
+  broadcast_my_lobby_info(network)
+}
+
+broadcast_my_lobby_info :: proc(network: ^Network) {
+  assert(client_is_lobby_master(network))
+  buf: [1024]u8
+
+  for client in network.lobby.clients[0:network.lobby.client_count] {
+    copy_from_string(buf[:], LOBBY_INFO_PREFIX)
+
+    size := lobby_to_bytes(&network.lobby, buf[PREFIX_SIZE:])
+
+    payload := buf[0:u16(PREFIX_SIZE)+size]
+
+    net.send_udp(network.discovery, payload, client.endpoint)
   }
 }
