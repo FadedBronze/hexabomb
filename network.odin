@@ -210,6 +210,78 @@ lobby_to_bytes :: proc(lobby: ^Lobby, buf: []u8) -> u16 {
   return u16(original_size - len(buf))
 }
 
+bytes_to_lobby :: proc(payload: []u8) -> (ok: bool, size: u16, lobby: Lobby) {
+  offset: u16 = 0
+  lobby.name_len = payload[offset]
+  offset += 1
+
+  copy(lobby.name_buf[:], payload[offset:u16(lobby.name_len)+offset])
+  offset += u16(lobby.name_len)
+
+  lobby.creatorIdx = payload[offset]
+  offset += 1 
+
+  lobby.client_count = payload[offset]
+  offset += 1 
+
+  for i in 0..<lobby.client_count {
+    ok: bool
+    clientSize: u16
+    ok, clientSize, lobby.clients[i] = bytes_to_client(payload[offset:])
+
+    if !ok {
+      fmt.println("parse client failed")
+      return false, 0, Lobby{}
+    }
+
+    offset += clientSize
+  }
+
+  return true, offset, lobby
+}
+
+bytes_to_client :: proc(payload: []u8) -> (bool, u16, Client) {
+  client: Client
+
+  client.name_len = payload[0]
+  copy_slice(client.name_buf[:], payload[1:1+u16(client.name_len)])
+
+  addressSize: u16
+  ok: bool
+  ok, addressSize, client.endpoint = decode_endpoint(payload[1+u16(client.name_len):])
+
+  if !ok {
+    fmt.println("parse client IP failed")
+    return false, 0, Client{}
+  }
+
+  return true, addressSize+1+u16(client.name_len), client
+}
+
+decode_endpoint :: proc(payload: []u8) -> (ok: bool, size: u16, endpoint: net.Endpoint) {
+  assert(len(payload) >= 7)
+
+  portNumber := endian.unchecked_get_u16be(payload[0:2])
+  endpoint.port = int(portNumber)
+
+  if payload[2] == 4 {
+    addressNumber := endian.unchecked_get_u32be(payload[3:7])
+    endpoint.address = transmute(net.IP4_Address)addressNumber 
+  } else if payload[2] == 16 {
+    assert(len(payload) >= 19)
+
+    addressSlice: [16]u8
+    copy_slice(addressSlice[:], payload[3:19])
+    endpoint.address = transmute(net.IP6_Address)addressSlice
+  } else {
+    fmt.println("unkown IP format")
+
+    return false, 0, endpoint
+  }
+
+  return true, u16(payload[2])+1+2, endpoint
+}
+
 encode_endpoint :: proc(endpoint: net.Endpoint, buf: []u8) -> u8 {
   buf := buf
   endian.put_u16(buf[0:2], .Big, u16(endpoint.port))
@@ -284,7 +356,13 @@ recieve_discovery_messages :: proc(network: ^Network, gameState: GameState) {
 }
 
 accept_lobby_info :: proc(network: ^Network, endpoint: net.Endpoint, payload: []u8){
-  fmt.println("accepted", payload)
+  ok, size, lobby := bytes_to_lobby(payload)
+
+  fmt.println(
+    lobby.name_buf[0:lobby.name_len], 
+    lobby.clients[0:lobby.client_count], 
+    lobby.clients[lobby.creatorIdx].name_buf[0:lobby.clients[lobby.creatorIdx].name_len]
+  )
 }
 
 accept_join_lobby :: proc(network: ^Network, endpoint: net.Endpoint) {
