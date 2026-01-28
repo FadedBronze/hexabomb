@@ -8,14 +8,18 @@ import "core:strconv"
 import "core:time"
 import "core:encoding/endian"
 
+import rl "vendor:raylib"
+import la "core:math/linalg"
+
 MAX_CLIENTS :: 4
 MAX_LOBBIES :: 4
 DISCOVERY_PORTS := [3]int{4000, 4001, 4002}
 MAX_NAME_CHARS :: 32
 
-LOBBY_INFO_PREFIX ::  "HXBLBINF_"
-LOBBY_JOIN_PREFIX ::  "HXBLJOIN_"
-LOBBY_ENTRY_PREFIX :: "HXBENTRY_"
+LOBBY_INFO_PREFIX ::      "HXBLBINF_"
+LOBBY_JOIN_PREFIX ::      "HXBLJOIN_"
+LOBBY_ENTRY_PREFIX ::     "HXBENTRY_"
+LOBBY_STARTGAME_PREFIX :: "HXBSTARG_"
 PREFIX_SIZE :: len(LOBBY_INFO_PREFIX)
 
 LOCAL_IP := net.IP4_Address{127, 0, 0, 1}
@@ -41,7 +45,16 @@ LobbyEntry :: struct {
   name_len: u8,
 }
 
+NetworkState :: enum {
+  Connecting,
+  WaitingForLobbyInfo,
+  InLobby,
+}
+
 Network :: struct {
+  ui: UI,
+  state: NetworkState,
+
   last_broadcast: time.Time,
 
   lobbyEntries: [MAX_LOBBIES]LobbyEntry,
@@ -53,7 +66,7 @@ Network :: struct {
   myEndpoint: net.Endpoint,
 }
 
-init_network :: proc(network: ^Network) -> bool {
+init_network :: proc(network: ^Network) {
   port := 6969
   for arg in os.args {
     if strings.has_prefix(arg, "-p=") {
@@ -66,10 +79,12 @@ init_network :: proc(network: ^Network) -> bool {
 
   sock, err := net.make_bound_udp_socket(addr, port)
   net.set_blocking(sock, false)
+    
+  fmt.println(port)
 
   if err != nil {
     fmt.println(err)
-    return false
+    assert(false)
   }
   
   discovery: net.UDP_Socket 
@@ -79,14 +94,14 @@ init_network :: proc(network: ^Network) -> bool {
   for DISCOVERY_PORT in DISCOVERY_PORTS[:] {
     err2: net.Network_Error 
     discovery, err2 = net.make_bound_udp_socket(addr, DISCOVERY_PORT)
-
+      
     if err2 != nil {
-      if err2 == net.Bind_Error.Address_In_Use {
+      if err2.(net.Bind_Error) == .Address_In_Use {
         continue
       }
 
+      assert(false)
       fmt.println(err2)
-      return false
     }
 
     foundPort = true
@@ -94,11 +109,9 @@ init_network :: proc(network: ^Network) -> bool {
     break
   }
 
-  fmt.println(discoveryPort, discovery)
-
   if foundPort == false {
     fmt.println("ports filled")
-    return false
+    assert(false)
   }
 
   net.set_blocking(discovery, false)
@@ -113,8 +126,6 @@ init_network :: proc(network: ^Network) -> bool {
     lobby = {},
     last_broadcast = time.now(),
   }
-
-  return true
 }
 
 create_lobby :: proc(network: ^Network, name: string) {
@@ -161,22 +172,12 @@ broadcast_my_lobby_entry :: proc(network: ^Network) {
 }
 
 request_join_lobby :: proc(network: ^Network, endpoint: net.Endpoint) {
-  payload := LOBBY_JOIN_PREFIX
-  net.send_udp(network.discovery, transmute([]byte)payload, endpoint)
-}
+  payload: [PREFIX_SIZE + 19]u8
 
-recieve_messages :: proc(network: ^Network) {
-  buf: [1024]u8
-  length, endpoint, err := net.recv_udp(network.socket, buf[:])
+  copy(payload[:PREFIX_SIZE], LOBBY_JOIN_PREFIX)
+  size := encode_endpoint(network.myEndpoint, payload[PREFIX_SIZE:])
 
-  if err != nil && err != .Would_Block {
-    fmt.println(err)
-    return
-  }
-
-  payload := strings.string_from_ptr(raw_data(buf[:]), PREFIX_SIZE)
-
-  master := !client_is_lobby_master(network)
+  net.send_udp(network.discovery, payload[:PREFIX_SIZE+size], endpoint)
 }
 
 fmt_lobby_name :: proc(lobby: ^LobbyEntry) -> string {
@@ -324,7 +325,7 @@ retrieve_lobby_entries :: proc(network: ^Network, endpoint: net.Endpoint, payloa
   network.lobbyEntryCount += 1
 }
 
-recieve_discovery_messages :: proc(network: ^Network, gameState: GameState) {
+recieve_discovery_messages :: proc(network: ^Network) {
   buf: [1024]u8
   length, endpoint, err := net.recv_udp(network.discovery, buf[:])
 
@@ -340,17 +341,38 @@ recieve_discovery_messages :: proc(network: ^Network, gameState: GameState) {
   master := client_is_lobby_master(network)
 
   switch payload {
-  case LOBBY_INFO_PREFIX:
-    if !master && gameState == .WaitingForLobbyInfo {
-      accept_lobby_info(network, endpoint, buf[PREFIX_SIZE:])
-    }
   case LOBBY_JOIN_PREFIX:
-    if master && gameState == .InLobby {
-      accept_join_lobby(network, endpoint)
+    if master && network.state == .InLobby {
+      accept_join_lobby(network, buf[PREFIX_SIZE:])
     }
   case LOBBY_ENTRY_PREFIX:
-    if gameState == .Connecting {
+    if network.state == .Connecting {
       retrieve_lobby_entries(network, endpoint, buf[PREFIX_SIZE:])
+    }
+  }
+}
+
+recieve_messages :: proc(network: ^Network, appState: ^AppState) {
+  buf: [1024]u8
+  length, endpoint, err := net.recv_udp(network.socket, buf[:])
+
+  if err != nil && err != .Would_Block {
+    fmt.println(err)
+    return
+  }
+
+  payload := strings.string_from_ptr(raw_data(buf[:]), PREFIX_SIZE)
+
+  master := client_is_lobby_master(network)
+
+  switch payload {
+  case LOBBY_INFO_PREFIX:
+    if !master && (network.state == .WaitingForLobbyInfo || network.state == .InLobby) {
+      accept_lobby_info(network, endpoint, buf[PREFIX_SIZE:])
+    }
+  case LOBBY_STARTGAME_PREFIX:
+    if network.state == .InLobby {
+      appState^ = .Playing
     }
   }
 }
@@ -358,16 +380,24 @@ recieve_discovery_messages :: proc(network: ^Network, gameState: GameState) {
 accept_lobby_info :: proc(network: ^Network, endpoint: net.Endpoint, payload: []u8){
   ok, size, lobby := bytes_to_lobby(payload)
 
-  fmt.println(
-    lobby.name_buf[0:lobby.name_len], 
-    lobby.clients[0:lobby.client_count], 
-    lobby.clients[lobby.creatorIdx].name_buf[0:lobby.clients[lobby.creatorIdx].name_len]
-  )
+  if ok {
+    network.lobby = lobby
+    network.state = .InLobby
+  } else {
+    fmt.println("parse lobby info failed")
+  }
 }
 
-accept_join_lobby :: proc(network: ^Network, endpoint: net.Endpoint) {
+accept_join_lobby :: proc(network: ^Network, payload: []u8) {
+  ok, size, client_endpoint := decode_endpoint(payload)
+
+  if !ok {
+    fmt.println("client decode endpoint failed")
+    return
+  }
+
   network.lobby.clients[network.lobby.client_count] = Client {
-    endpoint = endpoint,
+    endpoint = client_endpoint,
   }
   network.lobby.client_count += 1
 
@@ -385,6 +415,116 @@ broadcast_my_lobby_info :: proc(network: ^Network) {
 
     payload := buf[0:u16(PREFIX_SIZE)+size]
 
-    net.send_udp(network.discovery, payload, client.endpoint)
+    net.send_udp(network.socket, payload, client.endpoint)
+  }
+}
+
+broadcast_game_start :: proc(network: ^Network) {
+  for client in network.lobby.clients[0:network.lobby.client_count] {
+    prefix_buf: [PREFIX_SIZE]u8
+    copy(prefix_buf[:], LOBBY_STARTGAME_PREFIX)
+    net.send_udp(network.socket, prefix_buf[:], client.endpoint)
+  }
+}
+
+broadcast_input_state :: proc(network: ^Network) {
+  rl.GetMousePosition()
+  rl.IsMouseButtonDown(.LEFT)
+  rl.IsMouseButtonPressed(.LEFT)
+}
+
+update_network :: proc(network: ^Network, appState: ^AppState) {
+  switch network.state {
+    case .WaitingForLobbyInfo:
+      recieve_messages(network, appState)
+
+      rl.DrawRectangle(0, 0, rl.GetScreenWidth(), rl.GetScreenHeight(), rl.Color{
+        0, 0, 0, 150
+      })
+    case .InLobby:
+      recieve_messages(network, appState)
+
+      rl.DrawRectangle(0, 0, rl.GetScreenWidth(), rl.GetScreenHeight(), rl.Color{
+        0, 0, 0, 150
+      })
+      
+      buf: [2]u8
+      buf[0] = network.lobby.client_count + '0'
+      buf[1] = '\x00'
+      rl.DrawText(transmute(cstring)raw_data(buf[:]), 10, 10, 24, rl.WHITE)
+
+      if client_is_lobby_master(network) {
+        broadcast_my_lobby_entry(network)
+        recieve_discovery_messages(network)
+
+        start := button(&network.ui, rl.Rectangle{
+          x = f32(rl.GetScreenWidth())/2 - 75,
+          y = f32(rl.GetScreenHeight())/2 - 75,
+          width = 150,
+          height = 150,
+        }, "start", rl.GRAY) 
+
+        if start {
+          broadcast_game_start(network)
+        }
+      }
+    case .Connecting:
+      recieve_discovery_messages(network)
+
+      rl.DrawRectangle(0, 0, rl.GetScreenWidth(), rl.GetScreenHeight(), rl.Color{
+        0, 0, 0, 150
+      })
+
+      row_layout(&network.ui, .Up, la.Vector2f32{
+        f32(rl.GetScreenWidth())/2 - 75,
+        f32(rl.GetScreenHeight())/2 - 75,
+      }, 10)
+
+      lobby_count := network.lobbyEntryCount 
+
+      if button(&network.ui, rl.Rectangle{
+        width = 150,
+        height = 50,
+      }, lobby_count > 0 ? fmt_lobby_name(&network.lobbyEntries[0]) : "--", rl.GRAY) {
+        request_join_lobby(network, network.lobbyEntries[0].endpoint)
+        network.state = .WaitingForLobbyInfo
+      }
+      
+      if button(&network.ui, rl.Rectangle{
+        width = 150,
+        height = 50,
+      }, lobby_count > 1 ? fmt_lobby_name(&network.lobbyEntries[1]) : "--", rl.GRAY) {
+        request_join_lobby(network, network.lobbyEntries[1].endpoint)
+        network.state = .WaitingForLobbyInfo
+      }
+      
+      if button(&network.ui, rl.Rectangle{
+        width = 150,
+        height = 50,
+      }, lobby_count > 2 ? fmt_lobby_name(&network.lobbyEntries[2]) : "--", rl.GRAY) {
+        request_join_lobby(network, network.lobbyEntries[2].endpoint)
+        network.state = .WaitingForLobbyInfo
+      }
+      
+      if button(&network.ui, rl.Rectangle{
+        width = 150,
+        height = 50,
+      }, lobby_count > 3 ? fmt_lobby_name(&network.lobbyEntries[3]) : "--", rl.GRAY) {
+        request_join_lobby(network, network.lobbyEntries[3].endpoint)
+        network.state = .WaitingForLobbyInfo
+      }
+      
+      create_room := button(&network.ui, rl.Rectangle{
+        width = 150,
+        height = 50,
+      }, "create room", rl.GRAY)
+
+      row_layout_end(&network.ui)
+
+      if (create_room) {
+        create_lobby(network, "the room")
+        network.state = .InLobby
+        //start_next_turn(game)
+      }
   }
 }

@@ -235,12 +235,6 @@ SimulationEntity :: struct {
 }
 
 GameState :: enum {
-  //Network
-  Connecting,
-  WaitingForLobbyInfo,
-  InLobby,
-
-  //Gameplay
   Playing,
   BetweenRounds,
   Simulate,
@@ -250,7 +244,6 @@ GameState :: enum {
 
 Game :: struct {
   ui: UI,
-  network: Network,
 
   state: GameState,
   order: bool,
@@ -305,6 +298,8 @@ init_game :: proc(game: ^Game) {
     playerCount = 2,
   }
 
+  game.ui.virtual = false
+
   game.players[0] = Player {
     color = rl.BLUE,
     username = "Blue",
@@ -326,7 +321,6 @@ init_game :: proc(game: ^Game) {
   //}
 
   init_tilegrid(&game.tileGrid, &game.ui)
-  init_network(&game.network)
 }
 
 get_tile_id :: proc(pos: HalfGridPosition) -> u32 {
@@ -977,77 +971,7 @@ update_game :: proc(game: ^Game, dt: f32) {
     update_tilegrid_offset(&game.tileGrid)
     render_gameboard(game)
 
-    recieve_discovery_messages(&game.network, game.state)
-
     switch game.state {
-      case .WaitingForLobbyInfo:
-        rl.DrawRectangle(0, 0, rl.GetScreenWidth(), rl.GetScreenHeight(), rl.Color{
-          0, 0, 0, 150
-        })
-      case .InLobby:
-        rl.DrawRectangle(0, 0, rl.GetScreenWidth(), rl.GetScreenHeight(), rl.Color{
-          0, 0, 0, 150
-        })
-
-        if client_is_lobby_master(&game.network) {
-          broadcast_my_lobby_entry(&game.network)
-        }
-      case .Connecting:
-        rl.DrawRectangle(0, 0, rl.GetScreenWidth(), rl.GetScreenHeight(), rl.Color{
-          0, 0, 0, 150
-        })
-
-        row_layout(&game.ui, .Up, la.Vector2f32{
-          f32(rl.GetScreenWidth())/2 - 75,
-          f32(rl.GetScreenHeight())/2 - 75,
-        }, 10)
-
-        lobby_count := game.network.lobbyEntryCount 
-
-        if button(&game.ui, rl.Rectangle{
-          width = 150,
-          height = 50,
-        }, lobby_count > 0 ? fmt_lobby_name(&game.network.lobbyEntries[0]) : "--", rl.GRAY) {
-          request_join_lobby(&game.network, game.network.lobbyEntries[0].endpoint)
-          game.state = .WaitingForLobbyInfo
-        }
-        
-        if button(&game.ui, rl.Rectangle{
-          width = 150,
-          height = 50,
-        }, lobby_count > 1 ? fmt_lobby_name(&game.network.lobbyEntries[1]) : "--", rl.GRAY) {
-          request_join_lobby(&game.network, game.network.lobbyEntries[1].endpoint)
-          game.state = .WaitingForLobbyInfo
-        }
-        
-        if button(&game.ui, rl.Rectangle{
-          width = 150,
-          height = 50,
-        }, lobby_count > 2 ? fmt_lobby_name(&game.network.lobbyEntries[2]) : "--", rl.GRAY) {
-          request_join_lobby(&game.network, game.network.lobbyEntries[2].endpoint)
-          game.state = .WaitingForLobbyInfo
-        }
-        
-        if button(&game.ui, rl.Rectangle{
-          width = 150,
-          height = 50,
-        }, lobby_count > 3 ? fmt_lobby_name(&game.network.lobbyEntries[3]) : "--", rl.GRAY) {
-          request_join_lobby(&game.network, game.network.lobbyEntries[3].endpoint)
-          game.state = .WaitingForLobbyInfo
-        }
-        
-        create_room := button(&game.ui, rl.Rectangle{
-          width = 150,
-          height = 50,
-        }, "create room", rl.GRAY)
-
-        row_layout_end(&game.ui)
-
-        if (create_room) {
-          create_lobby(&game.network, "the room")
-          game.state = .InLobby
-          //start_next_turn(game)
-        }
       case .Paused:
         play := button(&game.ui, rl.Rectangle{
           x = f32(rl.GetScreenWidth())/2 - 75,
@@ -1100,20 +1024,45 @@ update_game :: proc(game: ^Game, dt: f32) {
     }    
 }
 
-main :: proc() {
+AppState :: enum {
+  Connecting,
+  Playing,
+}
+
+App :: struct {
+  network: Network,
+  game: Game,
+  state: AppState,
+}
+
+init_app :: proc(app: ^App) {
   game: Game
-  init_game(&game)
-  
+  init_game(&app.game)
+  init_network(&app.network)
+}
+
+update_app :: proc(app: ^App, dt: f32) {
+  switch app.state {
+  case .Playing:
+    update_game(&app.game, dt)
+  case .Connecting:
+    update_network(&app.network, &app.state)
+  }
+}
+
+main :: proc() {
   rl.InitWindow(800, 800, "hexabomb")
   rl.SetWindowState({.WINDOW_RESIZABLE})
+
+  app: App
+  init_app(&app)
 
   for !rl.WindowShouldClose() {
     rl.BeginDrawing()
     rl.ClearBackground(rl.WHITE)
 
-    update_game(&game, rl.GetFrameTime())
+    update_app(&app, rl.GetFrameTime())
 
     rl.EndDrawing()
   }
 }
-

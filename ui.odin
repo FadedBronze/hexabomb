@@ -12,6 +12,7 @@ UI :: struct {
   activeId: rn.Source_Code_Location,
   buttons_length: u16,
   button_offset: u32,
+  virtual: bool,
   active_layout: Layout,
 }
 
@@ -25,8 +26,8 @@ RowDirection :: enum {
 EmptyLayout :: struct {}
 
 Layout :: union {
+  EmptyLayout,
   RowLayout,
-  EmptyLayout
 }
 
 RowLayout :: struct {
