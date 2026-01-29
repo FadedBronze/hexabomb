@@ -91,7 +91,7 @@ button :: proc(ui: ^UI, inputState: ^InputState, rectangle: rl.Rectangle, text: 
     rl.DrawRectangleRec(rectangle, col)
   }
   within_button := within_rectangle(rectangle, inputState.mousePos)
-  mouse_down := rl.IsMouseButtonDown(.LEFT)
+  mouse_down := inputState.leftButton == .Down
 
   if within_button {
     ui.activeId = id
@@ -113,7 +113,7 @@ button :: proc(ui: ^UI, inputState: ^InputState, rectangle: rl.Rectangle, text: 
     if !ui.virtual {
       rl.DrawRectangleLines(i32(rectangle.x), i32(rectangle.y), i32(rectangle.width), i32(rectangle.height), rl.BLACK)
     }
-    pressed = rl.IsMouseButtonPressed(.LEFT)
+    pressed = inputState.leftButton == .Pressed
   }
 
   str := strings.unsafe_string_to_cstring(strings.concatenate({text, "\x00"}))

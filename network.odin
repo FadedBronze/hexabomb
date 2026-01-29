@@ -38,6 +38,7 @@ Lobby :: struct {
   client_count: u8,
   clients: [MAX_PLAYERS]Client,
   inputStates: [MAX_PLAYERS]InputState,
+  lastFrameInputStates: [MAX_PLAYERS]InputState,
 }
 
 LobbyEntry :: struct {
@@ -58,6 +59,7 @@ Network :: struct {
   state: NetworkState,
 
   last_broadcast: time.Time,
+  last_inputstate_update: time.Time,
 
   lobbyEntries: [MAX_LOBBIES]LobbyEntry,
   lobbyEntryCount: u8,
@@ -154,7 +156,7 @@ get_client_player_idx :: proc(network: ^Network) -> u8 {
 
 get_endpoint_player_idx :: proc(network: ^Network, endpoint: net.Endpoint) -> u8 {
   for client, i in network.lobby.clients[:network.lobby.client_count] {
-    if client.endpoint == network.myEndpoint {
+    if client.endpoint == endpoint {
       return u8(i)
     }
   }
@@ -268,6 +270,8 @@ bytes_to_client :: proc(payload: []u8) -> (bool, u16, Client) {
   ok: bool
   ok, addressSize, client.endpoint = decode_endpoint(payload[1+u16(client.name_len):])
 
+
+
   if !ok {
     fmt.println("parse client IP failed")
     return false, 0, Client{}
@@ -370,42 +374,75 @@ recieve_discovery_messages :: proc(network: ^Network) {
 }
 
 recieve_messages :: proc(network: ^Network) {
-  buf: [1024]u8
-  length, endpoint, err := net.recv_udp(network.socket, buf[:])
+  for {
+    buf: [1024]u8
+    length, endpoint, err := net.recv_udp(network.socket, buf[:])
+    
+    if err == .Would_Block {
+      break
+    }
+      
+    if err != nil {
+      fmt.println(err)
+      return
+    }
 
-  if err != nil && err != .Would_Block {
-    fmt.println(err)
-    return
+    payload := strings.string_from_ptr(raw_data(buf[:]), PREFIX_SIZE)
+
+    master := client_is_lobby_master(network)
+
+    switch payload {
+    case LOBBY_INFO_PREFIX:
+      if !master && (network.state == .WaitingForLobbyInfo || network.state == .InLobby) {
+        accept_lobby_info(network, endpoint, buf[PREFIX_SIZE:])
+      }
+    case LOBBY_STARTGAME_PREFIX:
+      if network.state == .InLobby {
+        network.state = .Connected
+      }
+    case INPUTSTATE_PREFIX:
+      receive_input_state(network, endpoint, buf[PREFIX_SIZE:])
+    }
   }
 
-  payload := strings.string_from_ptr(raw_data(buf[:]), PREFIX_SIZE)
-
-  master := client_is_lobby_master(network)
-
-  switch payload {
-  case LOBBY_INFO_PREFIX:
-    if !master && (network.state == .WaitingForLobbyInfo || network.state == .InLobby) {
-      accept_lobby_info(network, endpoint, buf[PREFIX_SIZE:])
-    }
-  case LOBBY_STARTGAME_PREFIX:
-    if network.state == .InLobby {
-      network.state = .Connected
-    }
-  case INPUTSTATE_PREFIX:
-    receive_input_state(network, endpoint, buf[PREFIX_SIZE:])
-  }
+  reset_input_state(network)
 }
 
 receive_input_state :: proc(network: ^Network, endpoint: net.Endpoint, payload: []u8) {
   inputState := decodeInputState(payload)
   player := get_endpoint_player_idx(network, endpoint)
   assert(player < MAX_PLAYERS)
+  
+  if inputState.leftButton == .Pressed {
+    inputState.leftButton = .Down
+  }
+
   network.lobby.inputStates[player] = inputState
 }
 
+reset_input_state :: proc(network: ^Network) {
+  for i in 0..<network.lobby.client_count {
+    prevButton := network.lobby.lastFrameInputStates[i].leftButton
+    currButton := &network.lobby.inputStates[i].leftButton
+
+    if prevButton == .Up && currButton^ == .Down {
+      currButton^ = .Pressed
+    }
+
+    network.lobby.lastFrameInputStates[i] = network.lobby.inputStates[i]
+  }
+}
+
 broadcast_input_state :: proc(network: ^Network, inputState: ^InputState) {
-  buf: [17]u8
-  encodeInputState(inputState, buf[:])
+  buf: [17 + PREFIX_SIZE]u8
+  copy(buf[0:PREFIX_SIZE], INPUTSTATE_PREFIX) 
+  encodeInputState(inputState, buf[PREFIX_SIZE:])
+
+  now := time.now()
+  if time.diff(network.last_inputstate_update, now) < time.Millisecond * 1 {
+    return
+  }
+  network.last_inputstate_update = now
 
   for i in 0..<network.lobby.client_count {
     client := &network.lobby.clients[i]
@@ -472,6 +509,7 @@ broadcast_game_start :: proc(network: ^Network) {
 }
 
 encodeInputState :: proc(state: ^InputState, buf: []u8) -> (length: u16) {
+  state := state
   assert(len(buf) >= 9)
 
   endian.put_f32(buf[0:4], .Big, state.mousePos.x)

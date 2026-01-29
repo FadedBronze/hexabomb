@@ -242,7 +242,13 @@ GameState :: enum {
   Paused,
 }
 
+PlayerState :: enum {
+  Playing,
+  Done,
+}
+
 Player :: struct {
+  playerState: PlayerState,
   nukes: u8,
   color: rl.Color,
   selectedTileType: TileType,
@@ -391,7 +397,7 @@ click_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
 
   player := &game.players[currentPlayerIndex]
 
-  if rl.IsMouseButtonPressed(.LEFT) {
+  if inputState.leftButton == .Pressed {
     if hovered_tile.type == .Cannon && hovered_tile.playerIndex == currentPlayerIndex {
       player.activeTileId = get_tile_id(halfgrid)
       
@@ -628,7 +634,7 @@ place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
   activeTile, activeTileHalfgridPos := get_active_tile(&game.tileGrid, player)
   is_next, dir := next_to(halfgridPos, activeTileHalfgridPos)
 
-  if !rl.IsMouseButtonPressed(.LEFT) {
+  if inputState.leftButton != .Pressed {
     return
   }
 
@@ -675,6 +681,10 @@ place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
     return 
   }
 
+  if player.selectedTileType == .Land && tile.type == .Land {
+    return
+  }
+
   next_to_own_territory :: proc(game: ^Game, currentPlayerIndex: u8, tile: ^Tile) -> bool {
     player := &game.players[currentPlayerIndex]
     return tile.playerIndex == currentPlayerIndex && tile.type != .Blocked && tile.type != .Free
@@ -688,7 +698,7 @@ place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
     tile.visibility = .Invisible
     tile.playerIndex = currentPlayerIndex
     tile.type = player.selectedTileType
-
+  
     if player.selectedTileType == .Shield {
       tile.durability = 1
     }
@@ -711,34 +721,32 @@ place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
   }   
 }
 
-start_next_turn :: proc (game: ^Game, currentPlayerIndex: u32) {
-  //BIG TODO
+start_next_turn :: proc (game: ^Game, currentPlayerIndex: u8) {
+  player := &game.players[currentPlayerIndex]
+  player.playerState = .Done
 
-  //if game.order {
-  //  currentPlayerIndex += 1
+  all_done: bool = true
+  for i in 0..<game.playerCount {
+    player := &game.players[i]
 
-  //  if currentPlayerIndex == game.playerCount {
-  //    currentPlayerIndex = game.playerCount - 1
-  //    game.state = .BetweenRounds
-  //    game.order = !game.order
-  //
-  //    game.rounds += 1
-  //  }
-  //} else {
-  //  if currentPlayerIndex == 0 {
-  //    currentPlayerIndex = 1
-  //    game.state = .BetweenRounds
-  //    game.order = !game.order
-  //    
-  //    game.rounds += 1
-  //  }
+    if player.playerState != .Done {
+      all_done = false
+    }
+  }
 
-  //  currentPlayerIndex -= 1  
-  //}
+  fmt.println(all_done)
 
-  //game.tileGrid.activeTileId = 0
-  //player := &game.players[currentPlayerIndex]
-  //player.energy = 3
+  if !all_done {
+    return
+  }
+  
+  for i in 0..<game.playerCount {
+    player := &game.players[i]
+    player.playerState = .Playing
+    player.energy = 3
+    game.rounds += 1
+    game.state = .Simulate
+  }
 }
 
 ui_layout :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8) {
@@ -813,8 +821,7 @@ ui_layout :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8) 
     width = 150,
     height = 75,
   }, "end turn", player.color)) {
-    //BIG TODO
-    //start_next_turn(game)
+    start_next_turn(game, currentPlayerIndex)
   }
  
   text_display(ui, rl.Rectangle {
@@ -920,18 +927,6 @@ simulate :: proc(game: ^Game, dt: f32) {
       }
       
       if tile.type == .Shield {
-      //  availableDirs: [6][2]i16
-      //  availableDirCount: u32 = 0
-
-      //  for dir in directions {
-      //    tile := get_tile(&game.tileGrid, halfgridPos + dir)
-      //    if tile.type == .Free && within_halfgrid_range(game.tileGrid.size, halfgridPos + dir) {
-      //      availableDirs[availableDirCount] = dir
-      //      availableDirCount += 1
-      //    }
-      //  }
-
-        
         bounce_dir := directions[tile.direction]
 
         fwd_pos := get_screen_position(&game.tileGrid, halfgridPos + bounce_dir)
@@ -951,11 +946,17 @@ simulate :: proc(game: ^Game, dt: f32) {
 
 update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool) {
   player := &game.players[currentPlayerIndex]
+  
+  rl.DrawCircle(i32(player.inputState.mousePos.x), i32(player.inputState.mousePos.y), 12, rl.BLACK)
 
   update_tilegrid_offset(&game.tileGrid, player.inputState)
   
   if !virtual {
     render_gameboard(game, currentPlayerIndex)
+  }
+
+  if player.playerState == .Done {
+    return
   }
 
   switch game.state {
@@ -967,7 +968,7 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
       height = 150,
     }, "play", rl.GRAY)
 
-    if rl.IsKeyPressed(.P) || play {
+    if play {
       game.state = .Playing
     }
   case .PostSimulate:
@@ -995,9 +996,7 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
   case .Simulate:
     simulate(game, dt)
   case .Playing:
-    if rl.IsKeyPressed(.P) {
-      game.state = .Paused
-    }
+    //game.state = .Paused
 
     switch player.editMode {
       case .Placing:
@@ -1026,10 +1025,9 @@ App :: struct {
 }
 
 MouseState :: enum {
+  Up,
   Down,
   Pressed,
-  Up,
-  None,
 }
 
 InputState :: struct {
@@ -1043,19 +1041,19 @@ init_app :: proc(app: ^App) {
 }
 
 get_button_state :: proc() -> MouseState {
-  if rl.IsMouseButtonDown(.LEFT) {
-    return .Down
-  }
-  
   if rl.IsMouseButtonPressed(.LEFT) {
     return .Pressed
   }
-  
+
+  if rl.IsMouseButtonDown(.LEFT) {
+    return .Down
+  }
+   
   if rl.IsMouseButtonUp(.LEFT) {
     return .Up
   }
 
-  return .None
+  unreachable()
 }
 
 get_input_state :: proc() -> InputState {
@@ -1087,8 +1085,6 @@ init_game :: proc(app: ^App, myInputState: ^InputState) {
     player.selectedTileType = .Land
   }
 
-  fmt.println(app.gameInstance.players[0:app.gameInstance.playerCount])
-
   init_tilegrid(&app.gameInstance.tileGrid, &app.gameInstance.ui)
 }
 
@@ -1106,7 +1102,8 @@ update_app :: proc(app: ^App, dt: f32) {
         update_tilegrid_offset(&app.gameInstance.tileGrid, &myInputState)
         app.network.lobby.inputStates[i] = myInputState
       }
-
+      //virtual = false
+      
       app.gameInstance.ui.virtual = virtual
       update_game(&app.gameInstance, dt, u8(i), virtual)
     } 
