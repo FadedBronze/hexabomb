@@ -20,6 +20,7 @@ LOBBY_JOIN_PREFIX ::      "HXBLJOIN_"
 LOBBY_ENTRY_PREFIX ::     "HXBENTRY_"
 LOBBY_STARTGAME_PREFIX :: "HXBSTARG_"
 INPUTSTATE_PREFIX ::      "HXBINPUT_"
+INPUTSTATESYN_PREFIX ::   "HXBINSYN_"
 PREFIX_SIZE :: len(LOBBY_INFO_PREFIX)
 
 Client :: struct {
@@ -28,6 +29,8 @@ Client :: struct {
   name_buf: [MAX_NAME_CHARS]u8,
 }
 
+MAX_INPUTSTATE_ACKS :: 16
+
 Lobby :: struct {
   name_len: u8,
   name_buf: [MAX_NAME_CHARS]u8,
@@ -35,7 +38,6 @@ Lobby :: struct {
   client_count: u8,
   clients: [MAX_PLAYERS]Client,
   inputStates: [MAX_PLAYERS]InputState,
-  lastFrameInputStates: [MAX_PLAYERS]InputState,
 }
 
 LobbyEntry :: struct {
@@ -51,13 +53,24 @@ NetworkState :: enum {
   Connected,
 }
 
+InputStateAcks :: struct {
+  data: [MAX_INPUTSTATE_ACKS]struct{
+    packetId: u32,
+    sent: time.Time,
+    inputState: InputState,
+    endpoint: net.Endpoint,
+    retries: u8,
+  },
+  length: u8,
+}
+
 Network :: struct {
   ui: UI,
+  packet_id: u32,
   state: NetworkState,
   mask: net.IP4_Address,
 
   last_broadcast: time.Time,
-  last_inputstate_update: time.Time,
 
   lobbyEntries: [MAX_LOBBIES]LobbyEntry,
   lobbyEntryCount: u8,
@@ -66,7 +79,10 @@ Network :: struct {
   socket: net.UDP_Socket,
   lobby: Lobby,
   myEndpoint: net.Endpoint,
+  lastPacketId: u32,
 
+  acks: InputStateAcks,
+  
   testing: bool,
 }
 
@@ -415,8 +431,6 @@ recieve_discovery_messages :: proc(network: ^Network) {
     return
   }
 
-  fmt.println("hi")
-
   payload := strings.string_from_ptr(raw_data(buf[:]), PREFIX_SIZE)
 
   master := client_is_lobby_master(network)
@@ -429,94 +443,6 @@ recieve_discovery_messages :: proc(network: ^Network) {
   case LOBBY_ENTRY_PREFIX:
     if network.state == .Connecting {
       retrieve_lobby_entries(network, endpoint, buf[PREFIX_SIZE:])
-    }
-  }
-}
-
-recieve_messages :: proc(network: ^Network) {
-  for {
-    buf: [1024]u8
-    length, _, err := net.recv_udp(network.socket, buf[:])
-    
-    if err == .Would_Block {
-      break
-    }
-      
-    if err != nil {
-      fmt.println(err)
-      return
-    }
-
-    payload := strings.string_from_ptr(raw_data(buf[:]), PREFIX_SIZE)
-
-    master := client_is_lobby_master(network)
-
-    switch payload {
-    case LOBBY_INFO_PREFIX:
-      if !master && (network.state == .WaitingForLobbyInfo || network.state == .InLobby) {
-        accept_lobby_info(network, buf[PREFIX_SIZE:])
-      }
-    case LOBBY_STARTGAME_PREFIX:
-      if network.state == .InLobby {
-        network.state = .Connected
-      }
-    case INPUTSTATE_PREFIX:
-      receive_input_state(network, buf[PREFIX_SIZE:])
-    }
-  }
-
-  reset_input_state(network)
-}
-
-receive_input_state :: proc(network: ^Network, payload: []u8) {
-  inputState := decodeInputState(payload)
-  ok, size, endpoint := decode_endpoint(payload[17:])
-  assert(ok)
-  player := get_endpoint_player_idx(network, endpoint)
-  assert(player < MAX_PLAYERS)
-  
-  if inputState.leftButton == .Pressed {
-    inputState.leftButton = .Down
-  }
-
-  network.lobby.inputStates[player] = inputState
-}
-
-reset_input_state :: proc(network: ^Network) {
-  for i in 0..<network.lobby.client_count {
-    prevButton := network.lobby.lastFrameInputStates[i].leftButton
-    currButton := &network.lobby.inputStates[i].leftButton
-
-    if prevButton == .Up && currButton^ == .Down {
-      currButton^ = .Pressed
-    }
-
-    network.lobby.lastFrameInputStates[i] = network.lobby.inputStates[i]
-  }
-}
-
-broadcast_input_state :: proc(network: ^Network, inputState: ^InputState) {
-  buf: [PREFIX_SIZE + 17 + 19]u8
-  copy(buf[0:PREFIX_SIZE], INPUTSTATE_PREFIX) 
-  encodeInputState(inputState, buf[PREFIX_SIZE:])
-  encode_endpoint(network.myEndpoint, buf[PREFIX_SIZE+17:])
-
-  now := time.now()
-  if time.diff(network.last_inputstate_update, now) < time.Millisecond * 1 {
-    return
-  }
-  network.last_inputstate_update = now
-
-  for i in 0..<network.lobby.client_count {
-    client := &network.lobby.clients[i]
-
-    if client.endpoint == network.myEndpoint {
-      continue
-    }
-  
-    _, err := net.send_udp(network.socket, buf[:], client.endpoint)
-    if err != nil {
-      fmt.println(err)
     }
   }
 }
@@ -553,10 +479,6 @@ broadcast_my_lobby_info :: proc(network: ^Network) {
   buf: [1024]u8
 
   for client in network.lobby.clients[0:network.lobby.client_count] {
-    if client.endpoint == network.myEndpoint {
-      fmt.println("test")
-    }
-
     copy_from_string(buf[:], LOBBY_INFO_PREFIX)
 
     size := lobby_to_bytes(&network.lobby, buf[PREFIX_SIZE:])
@@ -701,5 +623,174 @@ update_network :: proc(network: ^Network, inputState: ^InputState) {
         network.state = .InLobby
         //start_next_turn(game)
       }
+  }
+}
+
+receive_input_state :: proc(network: ^Network, payload: []u8) {
+  inputState := decodeInputState(payload)
+  ok, size, endpoint := decode_endpoint(payload[17:])
+  assert(ok)
+  packet_id, okk := endian.get_u32(payload[17 + 19:], .Big)
+  assert(okk)
+  player := get_endpoint_player_idx(network, endpoint)
+
+  if packet_id < network.lastPacketId {
+    return
+  }
+
+  if player >= MAX_PLAYERS {
+    return
+  }
+
+  network.lastPacketId = packet_id
+  
+  if inputState.leftButton == .Pressed {
+    syn_buf: [PREFIX_SIZE + 4]u8
+    copy(syn_buf[0:PREFIX_SIZE], INPUTSTATESYN_PREFIX)
+    endian.put_u32(syn_buf[PREFIX_SIZE:], .Big, packet_id)
+    
+    _, err := net.send_udp(network.socket, syn_buf[:], endpoint)
+
+    if err != nil {
+      fmt.println(err)
+      assert(false)
+    }
+  }
+
+  if network.lobby.inputStates[player].leftButton == .Pressed {
+    return
+  }
+
+  network.lobby.inputStates[player] = inputState
+}
+
+reset_input_state :: proc(network: ^Network) {
+  for i in 0..<network.lobby.client_count {
+    network.lobby.inputStates[i].leftButton = .Down
+  }
+}
+
+broadcast_input_state :: proc(network: ^Network, inputState: ^InputState) {
+  buf: [PREFIX_SIZE + 17 + 19 + 4]u8
+  copy(buf[0:PREFIX_SIZE], INPUTSTATE_PREFIX) 
+  encodeInputState(inputState, buf[PREFIX_SIZE:])
+  encode_endpoint(network.myEndpoint, buf[PREFIX_SIZE+17:])
+
+  now := time.now()
+
+  length := network.acks.length
+  i: u8 = 0
+  for i < length {
+    ack := &network.acks.data[i]
+
+    if ack.retries == 0 {
+      network.acks.data[i] = network.acks.data[network.acks.length-1]
+      network.acks.length-=1
+
+      if network.acks.length == 0 {
+        break;
+      }
+      continue
+    }
+
+    if time.diff(ack.sent, now) < time.Millisecond * 5 {
+      return
+    }
+    ack.retries -= 1
+    ack.packetId = network.packet_id
+    ack.sent = now
+
+    broadcast_input_state_data(network, ack.endpoint, inputState, buf[:])
+
+    i += 1
+  }
+
+  for i in 0..<network.lobby.client_count {
+    client := &network.lobby.clients[i]
+    if inputState.leftButton == .Pressed {
+      network.acks.data[network.acks.length] = {
+        endpoint = client.endpoint,
+        packetId = network.packet_id,
+        retries = 2,
+        sent = now,
+        inputState = inputState^,
+      }
+      network.acks.length += 1
+    }
+
+    broadcast_input_state_data(network, client.endpoint, inputState, buf[:])
+  }
+}
+
+broadcast_input_state_data :: proc(network: ^Network, endpoint: net.Endpoint, inputState: ^InputState, buf: []u8) {
+  if endpoint == network.myEndpoint {
+    return
+  }
+
+  ok := endian.put_u32(buf[PREFIX_SIZE+17+19:], .Big, network.packet_id)
+  assert(ok)
+
+  network.packet_id += 1
+
+  _, err := net.send_udp(network.socket, buf[:], endpoint)
+  if err != nil {
+    fmt.println(err)
+  }
+}
+
+remove_acks :: proc(network: ^Network, buf: []u8) {
+  packet_id, ok := endian.get_u32(buf[:], .Big)
+  assert(ok)
+
+  found: int = -1
+
+  for i in 0..<int(network.acks.length) {
+    ack := &network.acks.data[i]
+    if ack.packetId == packet_id {
+      found = i
+    }
+  }
+
+  if found != -1 {
+    assert(network.acks.length > 0)
+    network.acks.data[found] = network.acks.data[network.acks.length-1]
+    network.acks.length -= 1
+  } else {
+    fmt.println("random syn packet", packet_id)
+  }
+}
+
+recieve_messages :: proc(network: ^Network) {
+  for {
+    buf: [1024]u8
+    length, _, err := net.recv_udp(network.socket, buf[:])
+    
+    if err == .Would_Block {
+      break
+    }
+      
+    if err != nil {
+      fmt.println(err)
+      return
+    }
+
+    payload := strings.string_from_ptr(raw_data(buf[:]), PREFIX_SIZE)
+
+    master := client_is_lobby_master(network)
+
+    switch payload {
+    case LOBBY_INFO_PREFIX:
+      if !master && (network.state == .WaitingForLobbyInfo || network.state == .InLobby) {
+        accept_lobby_info(network, buf[PREFIX_SIZE:])
+      }
+    case LOBBY_STARTGAME_PREFIX:
+      if network.state == .InLobby {
+        network.state = .Connected
+      }
+    case INPUTSTATE_PREFIX:
+      receive_input_state(network, buf[PREFIX_SIZE:])
+    case INPUTSTATESYN_PREFIX:
+      remove_acks(network, buf[PREFIX_SIZE:])
+    }
   }
 }

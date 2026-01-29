@@ -17,7 +17,7 @@ tileTypeCost := []u16{
   1,
   0,
   1,
-  5,
+  3,
   1,
   1,
   1,
@@ -63,10 +63,10 @@ TileType :: enum {
   Telescope,
 }
 
-Visibility :: enum {
+Visibility :: [MAX_PLAYERS]enum {
+  Invisible,
   Visible,
   VeryVisible,
-  Invisible,
 }
 
 HalfGridPosition :: [2]i16
@@ -235,10 +235,8 @@ SimulationEntity :: struct {
 }
 
 GameState :: enum {
-  BetweenRounds,
   Playing,
   Simulate,
-  PostSimulate,
   Paused,
 }
 
@@ -292,13 +290,13 @@ init_tilegrid :: proc(tileGrid: ^TileGrid, ui: ^UI) {
   get_tile(tileGrid, {2, 2})^ = Tile {
     playerIndex = 0,
     type = .Land,
-    visibility = .Invisible,
+    visibility = {},
   }
   
   get_tile(tileGrid, {-2, -2})^ = Tile {
     playerIndex = 1,
     type = .Land,
-    visibility = .Invisible,
+    visibility = {},
   }
 }
 
@@ -523,7 +521,9 @@ render_gameboard :: proc(game: ^Game, currentPlayerIndex: u8) {
       fill_hexagon_halfgrid(pos, tileGrid.offset, player.color, tileGrid.hexagonSize)
     }
 
-    if ((currentPlayerIndex == tile.playerIndex || tile.visibility == .Visible || tile.visibility == .VeryVisible) && game.state == .Playing) {
+    visibility := tile.visibility[currentPlayerIndex]
+
+    if ((currentPlayerIndex == tile.playerIndex || visibility == .Visible || visibility == .VeryVisible) && game.state == .Playing) {
       spos := get_screen_position(&game.tileGrid, pos)
 
       switch tile.type {
@@ -534,7 +534,7 @@ render_gameboard :: proc(game: ^Game, currentPlayerIndex: u8) {
         rl.DrawCircle(i32(spos.x), i32(spos.y)+15, 10, rl.Color{200, 200, 200, 255})
         rl.DrawCircle(i32(spos.x)+7, i32(spos.y)+7, 10, rl.Color{200, 200, 200, 255})
         
-        if currentPlayerIndex == tile.playerIndex || tile.visibility == .VeryVisible {
+        if currentPlayerIndex == tile.playerIndex || visibility == .VeryVisible {
           render_number(spos, tile.damage)
         }
       case .Telescope:
@@ -543,7 +543,7 @@ render_gameboard :: proc(game: ^Game, currentPlayerIndex: u8) {
       case .Shield:
         fill_hexagon(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
 
-        if currentPlayerIndex == tile.playerIndex || tile.visibility == .VeryVisible {
+        if currentPlayerIndex == tile.playerIndex || visibility == .VeryVisible {
           render_number(spos, tile.durability)
 
           dir := directionHexnormalized[tile.direction] * 7
@@ -645,7 +645,7 @@ place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
   if player.selectedTileType == .Nuke && within_game_bounds(game, halfgridPos) && pay_active_tile_cost(player) && player.nukes > 0 {
     player.nukes -= 1
     add_entity(game, currentPlayerIndex, halfgridPos, SimulationEntity {
-      damage = 2
+      damage = 1
     }, EntityType.Nuke)
   }
   
@@ -695,7 +695,7 @@ place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
   } 
 
   if pay_active_tile_cost(player) {
-    tile.visibility = .Invisible
+    tile.visibility[currentPlayerIndex] = .Invisible
     tile.playerIndex = currentPlayerIndex
     tile.type = player.selectedTileType
   
@@ -714,7 +714,7 @@ place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
         for within_game_bounds(game, pos) {
           pos += dir
 
-          get_tile(&game.tileGrid, pos).visibility = .VeryVisible
+          get_tile(&game.tileGrid, pos).visibility[currentPlayerIndex] = .VeryVisible
         }
       }
     }
@@ -870,7 +870,11 @@ damage_tile :: proc(tile: ^Tile, amount: u8) {
     tile.durability -= amount
   }
 
-  tile.visibility = .Visible
+  for i in 0..<MAX_PLAYERS {
+    if tile.visibility[i] == .Invisible {
+      tile.visibility[i] = .Visible
+    }
+  }
 }
 
 simulate :: proc(game: ^Game, dt: f32) {
@@ -880,7 +884,7 @@ simulate :: proc(game: ^Game, dt: f32) {
   if game.completed_entities == game.entity_count {
     game.entity_count = 0
     game.completed_entities = 0
-    game.state = .PostSimulate
+    game.state = .Playing
     return
   }
 
@@ -970,28 +974,6 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
 
     if play {
       game.state = .Playing
-    }
-  case .PostSimulate:
-    start := button(&game.ui, player.inputState, rl.Rectangle{
-      x = player.inputState.screenSize.x/2 - 75,
-      y = player.inputState.screenSize.y/2 - 75,
-      width = 150,
-      height = 150,
-    }, "continue", rl.GRAY)
-
-    if start {
-      game.state = .Playing
-    }
-  case .BetweenRounds:
-    start := button(&game.ui, player.inputState, rl.Rectangle{
-      x = f32(rl.GetScreenWidth())/2 - 75,
-      y = f32(rl.GetScreenHeight())/2 - 75,
-      width = 150,
-      height = 150,
-    }, "start", rl.GRAY)
-
-    if start {
-      game.state = .Simulate
     }
   case .Simulate:
     simulate(game, dt)
@@ -1097,12 +1079,10 @@ update_app :: proc(app: ^App, dt: f32) {
     for i in 0..<app.playerCount {
       virtual := i != app.playerIndex
 
-      //TODO?
       if !virtual {
         update_tilegrid_offset(&app.gameInstance.tileGrid, &myInputState)
         app.network.lobby.inputStates[i] = myInputState
       }
-      //virtual = false
       
       app.gameInstance.ui.virtual = virtual
       update_game(&app.gameInstance, dt, u8(i), virtual)
@@ -1113,6 +1093,8 @@ update_app :: proc(app: ^App, dt: f32) {
       init_game(app, &myInputState)
     }
   }
+  
+  reset_input_state(&app.network)
 }
 
 main :: proc() {
