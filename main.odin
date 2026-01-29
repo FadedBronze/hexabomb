@@ -947,7 +947,7 @@ simulate :: proc(game: ^Game, dt: f32) {
 update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool) {
   player := &game.players[currentPlayerIndex]
   
-  rl.DrawCircle(i32(player.inputState.mousePos.x), i32(player.inputState.mousePos.y), 12, rl.BLACK)
+  //rl.DrawCircle(i32(player.inputState.mousePos.x), i32(player.inputState.mousePos.y), 12, rl.BLACK)
 
   update_tilegrid_offset(&game.tileGrid, player.inputState)
   

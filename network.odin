@@ -22,9 +22,6 @@ LOBBY_STARTGAME_PREFIX :: "HXBSTARG_"
 INPUTSTATE_PREFIX ::      "HXBINPUT_"
 PREFIX_SIZE :: len(LOBBY_INFO_PREFIX)
 
-LOCAL_IP := net.IP4_Address{127, 0, 0, 1}
-BROADCAST_IP := LOCAL_IP
-
 Client :: struct {
   endpoint: net.Endpoint,
   name_len: u8,
@@ -57,6 +54,7 @@ NetworkState :: enum {
 Network :: struct {
   ui: UI,
   state: NetworkState,
+  mask: net.IP4_Address,
 
   last_broadcast: time.Time,
   last_inputstate_update: time.Time,
@@ -68,6 +66,8 @@ Network :: struct {
   socket: net.UDP_Socket,
   lobby: Lobby,
   myEndpoint: net.Endpoint,
+
+  testing: bool,
 }
 
 init_network :: proc(network: ^Network) {
@@ -76,16 +76,62 @@ init_network :: proc(network: ^Network) {
     if strings.has_prefix(arg, "-p=") {
       port = strconv.atoi(arg[3:])
     }
+    
+    if strings.has_prefix(arg, "--test") {
+      network.testing = true
+    }
   }
 
-  // TODO
-  addr := BROADCAST_IP
+  fmt.println("testing:", network.testing)
+  
+  addr := net.IP4_Loopback
 
-  sock, err := net.make_bound_udp_socket(addr, port)
+  if !network.testing {
+    if ifaces, err := net.enumerate_interfaces(); err == .None {
+      for iface in ifaces {
+        for unicast in iface.unicast {
+          router := false
+
+          for gw in iface.gateways {
+            if gw == unicast.address {
+              router = true
+              break;
+            }
+          }
+
+          if router {
+            continue
+          }
+
+          if address, ok := unicast.address.(net.IP4_Address); ok {
+            if address[0] == 127 {
+              continue
+            }
+
+            if address[0] == 169 && address[1] == 254 { continue }
+
+            addr = address
+            break;
+          }
+        }
+
+        if addr != net.IP4_Loopback {
+          break;
+        }
+      }
+    } else {
+      fmt.println(err)
+      assert(false)
+    }
+  }
+
+  if addr == net.IP4_Loopback {
+    fmt.println("no interface found")
+  }
+
+  sock, err := net.make_bound_udp_socket(net.IP4_Any, port)
   net.set_blocking(sock, false)
-    
-  fmt.println(port)
-
+ 
   if err != nil {
     fmt.println(err)
     assert(false)
@@ -94,11 +140,11 @@ init_network :: proc(network: ^Network) {
   discovery: net.UDP_Socket 
   foundPort: bool = false
   discoveryPort: int
-
+  
   for DISCOVERY_PORT in DISCOVERY_PORTS[:] {
     err2: net.Network_Error 
-    discovery, err2 = net.make_bound_udp_socket(addr, DISCOVERY_PORT)
-      
+    discovery, err2 = net.make_bound_udp_socket(net.IP4_Any, DISCOVERY_PORT)
+
     if err2 != nil {
       if err2.(net.Bind_Error) == .Address_In_Use {
         continue
@@ -118,15 +164,19 @@ init_network :: proc(network: ^Network) {
     assert(false)
   }
 
+  fmt.println(discoveryPort, port, addr)
+
   net.set_blocking(discovery, false)
 
   network ^= Network {
     discovery = discovery,
     socket = sock,
+    testing = network.testing,
     myEndpoint = {
       address = addr,
       port = port,
     },
+    mask = net.IP4_Address{255, 255, 255, 0},
     lobby = {},
     last_broadcast = time.now(),
   }
@@ -164,6 +214,14 @@ get_endpoint_player_idx :: proc(network: ^Network, endpoint: net.Endpoint) -> u8
   return MAX_PLAYERS
 }
 
+apply_subnet_mask :: proc(ip: net.IP4_Address, mask: net.IP4_Address) -> net.IP4_Address {
+  broadcast := net.IP4_Address{}
+  for i in 0..<4 {
+    broadcast[i] = (ip[i] & mask[i]) | (~mask[i])
+  }
+  return broadcast
+}
+
 broadcast_my_lobby_entry :: proc(network: ^Network) {
   assert(network.lobby.client_count != 0)
   assert(client_is_lobby_master(network))
@@ -181,9 +239,9 @@ broadcast_my_lobby_entry :: proc(network: ^Network) {
     copy(payload[PREFIX_SIZE+1:], network.lobby.name_buf[0:network.lobby.name_len])
 
     for DISCOVERY_PORT in DISCOVERY_PORTS {
-      //TODO
       net.send_udp(network.discovery, payload[0:PREFIX_SIZE+1+network.lobby.name_len], {
-        address = network.myEndpoint.address,
+        //TODO maybe handle v6
+        address = network.testing ? net.IP4_Address{127, 0, 0, 255} : apply_subnet_mask(network.myEndpoint.address.(net.IP4_Address), network.mask),
         port = DISCOVERY_PORT,
       })
     }
@@ -357,6 +415,8 @@ recieve_discovery_messages :: proc(network: ^Network) {
     return
   }
 
+  fmt.println("hi")
+
   payload := strings.string_from_ptr(raw_data(buf[:]), PREFIX_SIZE)
 
   master := client_is_lobby_master(network)
@@ -376,7 +436,7 @@ recieve_discovery_messages :: proc(network: ^Network) {
 recieve_messages :: proc(network: ^Network) {
   for {
     buf: [1024]u8
-    length, endpoint, err := net.recv_udp(network.socket, buf[:])
+    length, _, err := net.recv_udp(network.socket, buf[:])
     
     if err == .Would_Block {
       break
@@ -394,22 +454,24 @@ recieve_messages :: proc(network: ^Network) {
     switch payload {
     case LOBBY_INFO_PREFIX:
       if !master && (network.state == .WaitingForLobbyInfo || network.state == .InLobby) {
-        accept_lobby_info(network, endpoint, buf[PREFIX_SIZE:])
+        accept_lobby_info(network, buf[PREFIX_SIZE:])
       }
     case LOBBY_STARTGAME_PREFIX:
       if network.state == .InLobby {
         network.state = .Connected
       }
     case INPUTSTATE_PREFIX:
-      receive_input_state(network, endpoint, buf[PREFIX_SIZE:])
+      receive_input_state(network, buf[PREFIX_SIZE:])
     }
   }
 
   reset_input_state(network)
 }
 
-receive_input_state :: proc(network: ^Network, endpoint: net.Endpoint, payload: []u8) {
+receive_input_state :: proc(network: ^Network, payload: []u8) {
   inputState := decodeInputState(payload)
+  ok, size, endpoint := decode_endpoint(payload[17:])
+  assert(ok)
   player := get_endpoint_player_idx(network, endpoint)
   assert(player < MAX_PLAYERS)
   
@@ -434,9 +496,10 @@ reset_input_state :: proc(network: ^Network) {
 }
 
 broadcast_input_state :: proc(network: ^Network, inputState: ^InputState) {
-  buf: [17 + PREFIX_SIZE]u8
+  buf: [PREFIX_SIZE + 17 + 19]u8
   copy(buf[0:PREFIX_SIZE], INPUTSTATE_PREFIX) 
   encodeInputState(inputState, buf[PREFIX_SIZE:])
+  encode_endpoint(network.myEndpoint, buf[PREFIX_SIZE+17:])
 
   now := time.now()
   if time.diff(network.last_inputstate_update, now) < time.Millisecond * 1 {
@@ -458,7 +521,7 @@ broadcast_input_state :: proc(network: ^Network, inputState: ^InputState) {
   }
 }
 
-accept_lobby_info :: proc(network: ^Network, endpoint: net.Endpoint, payload: []u8){
+accept_lobby_info :: proc(network: ^Network, payload: []u8){
   ok, size, lobby := bytes_to_lobby(payload)
 
   if ok {
@@ -490,6 +553,10 @@ broadcast_my_lobby_info :: proc(network: ^Network) {
   buf: [1024]u8
 
   for client in network.lobby.clients[0:network.lobby.client_count] {
+    if client.endpoint == network.myEndpoint {
+      fmt.println("test")
+    }
+
     copy_from_string(buf[:], LOBBY_INFO_PREFIX)
 
     size := lobby_to_bytes(&network.lobby, buf[PREFIX_SIZE:])
@@ -572,6 +639,7 @@ update_network :: proc(network: ^Network, inputState: ^InputState) {
         }, "start", rl.GRAY) 
 
         if start {
+          network.state = .Connected
           broadcast_game_start(network)
         }
       }
