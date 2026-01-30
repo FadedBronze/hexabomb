@@ -578,7 +578,7 @@ update_network :: proc(network: ^Network, inputState: ^InputState) {
       }, 10)
 
       lobby_count := network.lobbyEntryCount 
-
+  
       if button(&network.ui, inputState, rl.Rectangle{
         width = 150,
         height = 50,
