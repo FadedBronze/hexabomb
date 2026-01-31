@@ -254,6 +254,8 @@ hover_tilegrid :: proc(tileGrid: ^TileGrid, inputState: ^InputState, player: ^Pl
     case .Telescope:
       rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{255, 255, 0, 255})
       rl.DrawCircle(i32(spos.x), i32(spos.y), 18, rl.Color{255, 255, 255, 255})
+    case .Defense:
+      fill_hexagon(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
     }
   } else {
     outline_hexagon_halfgrid(halfgrid, tileGrid.offset, rl.RED, tileGrid.hexagonSize)
@@ -327,8 +329,6 @@ render_gameboard :: proc(game: ^Game, currentPlayerIndex: u8) {
         fill_hexagon(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
 
         if currentPlayerIndex == tile.playerIndex || visibility == .VeryVisible {
-          render_number(spos, tile.durability)
-
           dir := directionHexnormalized[tile.direction] * 7
 
           rl.DrawTriangle(
@@ -336,6 +336,12 @@ render_gameboard :: proc(game: ^Game, currentPlayerIndex: u8) {
             spos + directionHexnormalized[(i8(tile.direction)-1 == -1) ? 5 : i8(tile.direction)-1] * 8 + dir, 
             spos + directionHexnormalized[tile.direction] * 8 + dir, 
           rl.Color{0, 0, 0, 255})
+        }
+      case .Defense:
+        fill_hexagon(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
+        
+        if currentPlayerIndex == tile.playerIndex || visibility == .VeryVisible {
+          render_number(spos, tile.durability)
         }
       case .Blocked:
       case .Free:
