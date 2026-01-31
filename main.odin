@@ -93,7 +93,7 @@ NA := max(u8)
 
 defaultTileTypeStats := [TileType]TileTypeStat{
   .Free = {NA, NA, NA, NA, 0}, 
-  .Blocked = {NA, NA, NA, NA, 0},
+  .Blocked = {NA, NA, NA, NA, NA},
   .Land = {NA, NA, NA, 1, 0},
   .Cannon = {NA, NA, NA, 1, 0},
   .Shield = {1, 1, NA, 0, 1},
@@ -542,9 +542,14 @@ complete_entity :: proc(game: ^Game, entity: ^SimulationEntity) {
   origin_tile.entityIds = {}
 }
 
-damage_tile :: proc(tile: ^Tile, amount: u8) {
+damage_tile :: proc(game: ^Game, tile: ^Tile, amount: u8) {
+  if game.tileTypeStats[tile.type].durability == NA {
+    return
+  }
+
   if amount > tile.durability {
     tile^ = {}
+    tile.type = .Free
   } else {
     tile.durability -= amount
   }
@@ -611,14 +616,14 @@ simulate :: proc(game: ^Game, dt: f32) {
     switch entity.type { 
     case .MortarShot:
       tile := get_tile(&game.tileGrid, entity.halfgridPos)
-      damage_tile(get_tile(&game.tileGrid, entity.halfgridPos), entity.damage)
+      damage_tile(game, get_tile(&game.tileGrid, entity.halfgridPos), entity.damage)
       
       complete_entity(game, entity)
     case .Nuke:
-      damage_tile(get_tile(&game.tileGrid, entity.halfgridPos), entity.damage)
+      damage_tile(game, get_tile(&game.tileGrid, entity.halfgridPos), entity.damage)
 
       for dir in directions {
-        damage_tile(get_tile(&game.tileGrid, entity.halfgridPos + dir), entity.damage)
+        damage_tile(game, get_tile(&game.tileGrid, entity.halfgridPos + dir), entity.damage)
       }
 
       complete_entity(game, entity)
@@ -640,7 +645,7 @@ simulate :: proc(game: ^Game, dt: f32) {
       prev_tile := get_tile(&game.tileGrid, get_tile_grid_pos(&game.tileGrid, prevpos))
 
       if prev_tile != tile && prev_tile.playerIndex != entity.playerIndex {
-        damage_tile(prev_tile, entity.damage)
+        damage_tile(game, prev_tile, entity.damage)
       }
       
       if tile.type == .Shield {
