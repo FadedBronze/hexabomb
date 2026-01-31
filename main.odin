@@ -167,17 +167,21 @@ click_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
 
   hovered_tile := get_tile(&game.tileGrid, halfgrid)
 
+  if hovered_tile.playerId == 0 {
+    return
+  }
+
   player := &game.players[currentPlayerIndex]
 
   if inputState.leftButton == .Pressed {
-    if hovered_tile.type == .Cannon && hovered_tile.playerIndex == currentPlayerIndex {
+    if hovered_tile.type == .Cannon && hovered_tile.playerId - 1 == currentPlayerIndex {
       player.activeTileId = get_tile_id(halfgrid)
       
       player.editMode = .Placing
       player.selectedTileType = .BlastTarget
     }
     
-    if (hovered_tile.type == .Mortar || hovered_tile.type == .Shield || hovered_tile.type == .Defense) && hovered_tile.playerIndex == currentPlayerIndex {
+    if (hovered_tile.type == .Mortar || hovered_tile.type == .Shield || hovered_tile.type == .Defense) && hovered_tile.playerId - 1 == currentPlayerIndex {
       player.activeTileId = get_tile_id(halfgrid)
     }
   }
@@ -359,7 +363,7 @@ place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
     return
   }
 
-  if player.selectedTileType != .Land && (tile.type != .Land || tile.playerIndex != currentPlayerIndex) {
+  if player.selectedTileType != .Land && (tile.type != .Land || tile.playerId != currentPlayerIndex + 1) {
     return 
   }
 
@@ -369,7 +373,7 @@ place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
 
   next_to_own_territory :: proc(game: ^Game, currentPlayerIndex: u8, tile: ^Tile) -> bool {
     player := &game.players[currentPlayerIndex]
-    return tile.playerIndex == currentPlayerIndex && tile.type != .Blocked && tile.type != .Free
+    return tile.playerId - 1 == currentPlayerIndex && tile.type != .Blocked && tile.type != .Free
   }
 
   if !test_adjacent_cell(game, currentPlayerIndex, halfgridPos, next_to_own_territory) && player.selectedTileType == .Land {
@@ -378,7 +382,7 @@ place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
 
   if pay_active_tile_cost(game, player) {
     tile.visibility[currentPlayerIndex] = .Invisible
-    tile.playerIndex = currentPlayerIndex
+    tile.playerId = currentPlayerIndex + 1
     tile.type = player.selectedTileType
   
     tile.durability = game.tileTypeStats[tile.type].durability
@@ -659,8 +663,12 @@ crown_winner :: proc(game: ^Game) {
     if tile == nil {
       break
     }
+
+    if tile.playerId == 0 {
+      continue
+    }
     
-    playerExists[tile.playerIndex] = true
+    playerExists[tile.playerId - 1] = true
   }
 
   lastPlayerIdx: i8 = -1
@@ -733,7 +741,7 @@ simulate :: proc(game: ^Game, dt: f32) {
 
       prev_tile := get_tile(&game.tileGrid, prevgridpos)
 
-      if prev_tile != tile && prev_tile.playerIndex != entity.playerIndex {
+      if prev_tile != tile && prev_tile.playerId - 1 != entity.playerIndex {
         damage_tile(game, prevgridpos, entity.damage)
       }
       
@@ -861,13 +869,13 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
       free_field(&game.tileGrid)
      
       get_tile(&game.tileGrid, {2, 2})^ = Tile {
-        playerIndex = 0,
+        playerId = 1,
         type = .Land,
         visibility = {},
       }
       
       get_tile(&game.tileGrid, {-2, -2})^ = Tile {
-        playerIndex = 1,
+        playerId = 2,
         type = .Land,
         visibility = {},
       }
@@ -904,13 +912,13 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
       randomize_field(&game.tileGrid)
      
       get_tile(&game.tileGrid, {3, 3})^ = Tile {
-        playerIndex = 0,
+        playerId = 1,
         type = .Land,
         visibility = {},
       }
       
       get_tile(&game.tileGrid, {-3, -3})^ = Tile {
-        playerIndex = 1,
+        playerId = 2,
         type = .Land,
         visibility = {},
       }
@@ -948,13 +956,13 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
       free_field(&game.tileGrid)
      
       get_tile(&game.tileGrid, {3, 3})^ = Tile {
-        playerIndex = 0,
+        playerId = 1,
         type = .Land,
         visibility = {},
       }
       
       get_tile(&game.tileGrid, {-3, -3})^ = Tile {
-        playerIndex = 1,
+        playerId = 2,
         type = .Land,
         visibility = {},
       }
@@ -980,13 +988,13 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
       randomize_field(&game.tileGrid)
      
       get_tile(&game.tileGrid, {3, 3})^ = Tile {
-        playerIndex = 0,
+        playerId = 1,
         type = .Land,
         visibility = {},
       }
       
       get_tile(&game.tileGrid, {-3, -3})^ = Tile {
-        playerIndex = 1,
+        playerId = 2,
         type = .Land,
         visibility = {},
       }

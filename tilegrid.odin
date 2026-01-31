@@ -36,7 +36,7 @@ directionHexnormalized := [][2]f32 {
 HalfGridPosition :: [2]i16
 
 Tile :: struct {
-  playerIndex: u8,
+  playerId: u8,
   visibility: Visibility,
   entityIds: [8]u32, 
   type: TileType,
@@ -291,15 +291,7 @@ render_gameboard :: proc(game: ^Game, currentPlayerIndex: u8) {
     if abs(pos.x) % 2 != abs(pos.y) % 2 {
       continue;
     }
-
-    player := &game.players[tile.playerIndex]
-
-    if tile.type != .Free && tile.type != .Blocked && tile.type != .BlastTarget {
-      fill_hexagon_halfgrid(pos, tileGrid.offset, player.color, tileGrid.hexagonSize)
-    }
-
-    visibility := tile.visibility[currentPlayerIndex]
-
+    
     if tile.type == .Blocked {
       fill_hexagon_halfgrid(pos, tileGrid.offset, rl.Color{255, 255, 255, 255}, game.tileGrid.hexagonSize)
     }
@@ -308,7 +300,19 @@ render_gameboard :: proc(game: ^Game, currentPlayerIndex: u8) {
       fill_hexagon_halfgrid(pos, tileGrid.offset, rl.Color{0, 20, 128, 255}, tileGrid.hexagonSize)
     }
 
-    if ((currentPlayerIndex == tile.playerIndex || visibility == .Visible || visibility == .VeryVisible) && game.state == .Playing || game.state == .Winner) {
+    if tile.playerId == 0 {
+      continue
+    }
+
+    player := &game.players[tile.playerId-1]
+
+    if tile.type != .Free && tile.type != .Blocked && tile.type != .BlastTarget {
+      fill_hexagon_halfgrid(pos, tileGrid.offset, player.color, tileGrid.hexagonSize)
+    }
+
+    visibility := tile.visibility[currentPlayerIndex]
+
+    if ((currentPlayerIndex == tile.playerId-1 || visibility == .Visible || visibility == .VeryVisible) && game.state == .Playing || game.state == .Winner) {
       spos := get_screen_position(&game.tileGrid, pos)
 
       switch tile.type {
@@ -319,7 +323,7 @@ render_gameboard :: proc(game: ^Game, currentPlayerIndex: u8) {
         rl.DrawCircle(i32(spos.x), i32(spos.y)+15, 10, rl.Color{200, 200, 200, 255})
         rl.DrawCircle(i32(spos.x)+7, i32(spos.y)+7, 10, rl.Color{200, 200, 200, 255})
         
-        if currentPlayerIndex == tile.playerIndex || visibility == .VeryVisible || game.state == .Winner {
+        if currentPlayerIndex == tile.playerId - 1 || visibility == .VeryVisible || game.state == .Winner {
           render_number(spos, tile.damage)
         }
       case .Telescope:
@@ -328,7 +332,7 @@ render_gameboard :: proc(game: ^Game, currentPlayerIndex: u8) {
       case .Shield:
         fill_hexagon(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
 
-        if currentPlayerIndex == tile.playerIndex || visibility == .VeryVisible {
+        if currentPlayerIndex == tile.playerId - 1 || visibility == .VeryVisible {
           dir := directionHexnormalized[tile.direction] * 7
 
           rl.DrawTriangle(
@@ -340,7 +344,7 @@ render_gameboard :: proc(game: ^Game, currentPlayerIndex: u8) {
       case .Defense:
         fill_hexagon(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
         
-        if currentPlayerIndex == tile.playerIndex || visibility == .VeryVisible {
+        if currentPlayerIndex == tile.playerId - 1 || visibility == .VeryVisible {
           render_number(spos, tile.durability)
         }
       case .Blocked:
