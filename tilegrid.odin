@@ -43,6 +43,7 @@ Tile :: struct {
   durability: u8,
   damage: u8,
   direction: HexDirection,
+  createdRound: u8,
 }
 
 TileGrid :: struct {
@@ -227,15 +228,11 @@ hover_tilegrid :: proc(tileGrid: ^TileGrid, inputState: ^InputState, player: ^Pl
     spos := get_screen_position(tileGrid, halfgrid)
 
     switch player.selectedTileType {
-    case .Nuke:
+    case .Nuke, .BlastTarget, .MortarTarget, .Landmine:
       rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{255, 0, 0, 255})
       rl.DrawCircle(i32(spos.x), i32(spos.y), 10, rl.Color{255, 255, 255, 255})
       rl.DrawCircle(i32(spos.x), i32(spos.y), 5, rl.Color{255, 0, 0, 255})
-    case .BlastTarget:
-      rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{255, 0, 0, 255})
-      rl.DrawCircle(i32(spos.x), i32(spos.y), 10, rl.Color{255, 255, 255, 255})
-      rl.DrawCircle(i32(spos.x), i32(spos.y), 5, rl.Color{255, 0, 0, 255})
-    case .Land:
+    case .Land, .BridgeStart, .BridgeEnd:
       fill_hexagon_halfgrid(halfgrid, tileGrid.offset, player.color, tileGrid.hexagonSize)
     case .Cannon:
       rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
@@ -247,10 +244,6 @@ hover_tilegrid :: proc(tileGrid: ^TileGrid, inputState: ^InputState, player: ^Pl
       rl.DrawCircle(i32(spos.x)+5, i32(spos.y), 10, rl.Color{200, 200, 200, 255})
       rl.DrawCircle(i32(spos.x), i32(spos.y)+5, 10, rl.Color{200, 200, 200, 255})
       rl.DrawCircle(i32(spos.x)+2, i32(spos.y)+2, 10, rl.Color{200, 200, 200, 255})
-    case .MortarTarget:
-      rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{255, 0, 0, 255})
-      rl.DrawCircle(i32(spos.x), i32(spos.y), 10, rl.Color{255, 255, 255, 255})
-      rl.DrawCircle(i32(spos.x), i32(spos.y), 5, rl.Color{255, 0, 0, 255})
     case .Telescope:
       rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{255, 255, 0, 255})
       rl.DrawCircle(i32(spos.x), i32(spos.y), 18, rl.Color{255, 255, 255, 255})
@@ -347,12 +340,18 @@ render_gameboard :: proc(game: ^Game, currentPlayerIndex: u8) {
         if currentPlayerIndex == tile.playerId - 1 || visibility == .VeryVisible {
           render_number(spos, tile.durability)
         }
+      case .Landmine:
+        rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{255, 0, 0, 125})
+        rl.DrawCircle(i32(spos.x), i32(spos.y), 10, rl.Color{255, 255, 255, 125})
+        rl.DrawCircle(i32(spos.x), i32(spos.y), 5, rl.Color{255, 0, 0, 125})
       case .Blocked:
       case .Free:
       case .Nuke:
       case .Land:
       case .BlastTarget:
       case .MortarTarget:
+      case .BridgeStart:
+      case .BridgeEnd:
       }
     }
 

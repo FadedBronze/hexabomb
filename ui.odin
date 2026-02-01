@@ -35,6 +35,7 @@ RowLayout :: struct {
   x_offset: f32,
   y_offset: f32,
   gap: f32,
+  bounds: [2]f32,
 }
 
 row_layout :: proc(ui: ^UI, direction: RowDirection, offset: la.Vector2f32, gap: f32) {
