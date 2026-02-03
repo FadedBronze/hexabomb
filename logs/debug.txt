@@ -3,3 +3,6 @@
 [2026-02-03 23:52:12.066294600 +0000 UTC](C:/Code/odin/hexabomb/main.odin(1367:5)) ["New Session"]
 [2026-02-03 23:52:12.066826900 +0000 UTC](C:/Code/odin/hexabomb/main.odin(1371:3)) ["testing:", false]
 [2026-02-03 23:52:12.082057500 +0000 UTC](C:/Code/odin/hexabomb/network.odin(206:3)) ["discovery port:", 4000, "port:", 6969, "address:", [192, 168, 2, 12]]
+[2026-02-03 23:54:59.548908200 +0000 UTC](C:/Code/odin/hexabomb/main.odin(1367:5)) ["New Session"]
+[2026-02-03 23:54:59.549257400 +0000 UTC](C:/Code/odin/hexabomb/main.odin(1371:3)) ["testing:", false]
+[2026-02-03 23:54:59.562174200 +0000 UTC](C:/Code/odin/hexabomb/network.odin(206:3)) ["discovery port:", 4000, "port:", 6969, "address:", [192, 168, 2, 12]]
