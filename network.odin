@@ -6,6 +6,7 @@ import "core:strings"
 import "core:strconv"
 import "core:time"
 import "core:encoding/endian"
+import "core:fmt"
 
 import rl "vendor:raylib"
 import la "core:math/linalg"
@@ -86,6 +87,8 @@ Network :: struct {
 }
 
 parse_cli_args :: proc() -> (port: int, testing: bool, clearlogs: bool) {
+  port = 6969
+
   for arg in os.args {
     if strings.has_prefix(arg, "-p=") {
       port = strconv.atoi(arg[3:])
@@ -97,8 +100,9 @@ parse_cli_args :: proc() -> (port: int, testing: bool, clearlogs: bool) {
     
     if strings.has_prefix(arg, "--clearlogs") {
       clearlogs = true
-    }
+    }   
   }
+
   return port, testing, clearlogs
 }
 

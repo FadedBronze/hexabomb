@@ -7,7 +7,7 @@ import "core:fmt"
 
 FileLogger :: struct {
   handle: os.Handle,
-  path: string
+  path: string,
 }
 
 init_log :: proc(errorLog: ^FileLogger, path: string, clear_file: bool) -> (ok:bool) {
@@ -21,7 +21,7 @@ init_log :: proc(errorLog: ^FileLogger, path: string, clear_file: bool) -> (ok:b
     }
   }
 
-  handle, err := os.open(path, os.O_APPEND)
+  handle, err := os.open(path, os.O_APPEND | os.O_CREATE)
 
   switch err {
   case .Permission_Denied, .Timeout, .Not_Exist, .Closed:
