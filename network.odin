@@ -1,6 +1,5 @@
 package main
 
-import "core:fmt"
 import "core:net"
 import "core:os"
 import "core:strings"
@@ -82,27 +81,31 @@ Network :: struct {
   lastPacketId: u32,
 
   acks: InputStateAcks,
-  
+
   testing: bool,
 }
 
-init_network :: proc(network: ^Network) {
-  port := 6969
+parse_cli_args :: proc() -> (port: int, testing: bool, clearlogs: bool) {
   for arg in os.args {
     if strings.has_prefix(arg, "-p=") {
       port = strconv.atoi(arg[3:])
     }
-    
+
     if strings.has_prefix(arg, "--test") {
-      network.testing = true
+      testing = true
+    }
+    
+    if strings.has_prefix(arg, "--clearlogs") {
+      clearlogs = true
     }
   }
+  return port, testing, clearlogs
+}
 
-  fmt.println("testing:", network.testing)
-  
+find_device_ip :: proc(testing: bool) -> net.IP4_Address {
   addr := net.IP4_Loopback
 
-  if !network.testing {
+  if !testing {
     if ifaces, err := net.enumerate_interfaces(); err == .None {
       for iface in ifaces {
         for unicast in iface.unicast {
@@ -136,29 +139,22 @@ init_network :: proc(network: ^Network) {
         }
       }
     } else {
-      fmt.println(err)
-      assert(false)
+      log_msg(&errorLogger, "Find device IP failed:", err)
+      return net.IP4_Loopback
     }
   }
-
+  
   if addr == net.IP4_Loopback {
-    fmt.println("no interface found")
+    log_msg(&errorLogger, "Find device IP failed")
+    return net.IP4_Loopback
   }
 
-  sock, err := net.make_bound_udp_socket(net.IP4_Any, port)
-  net.set_blocking(sock, false)
- 
-  if err != nil {
-    fmt.println(err)
-    assert(false)
-  }
-  
-  discovery: net.UDP_Socket 
-  foundPort: bool = false
-  discoveryPort: int
-  
+  return addr
+}
+
+find_available_discovery_port :: proc(network: ^Network) -> (ok: bool, discoveryPort: int, discovery: net.UDP_Socket) {
   for DISCOVERY_PORT in DISCOVERY_PORTS[:] {
-    err2: net.Network_Error 
+    err2: net.Network_Error
     discovery, err2 = net.make_bound_udp_socket(net.IP4_Any, DISCOVERY_PORT)
 
     if err2 != nil {
@@ -166,23 +162,50 @@ init_network :: proc(network: ^Network) {
         continue
       }
 
-      assert(false)
-      fmt.println(err2)
+      log_msg(&errorLogger, "Find port failed:", err2)
+      return false, 0, 0
     }
 
-    foundPort = true
+    ok = true
     discoveryPort = DISCOVERY_PORT
     break
   }
 
-  if foundPort == false {
-    fmt.println("ports filled")
-    assert(false)
+  if !ok {
+    log_msg(&errorLogger, "Find port failed: ports filled")
+    return false, 0, 0
   }
 
-  fmt.println(discoveryPort, port, addr)
+  return ok, discoveryPort, discovery
+}
 
-  net.set_blocking(discovery, false)
+init_network :: proc(network: ^Network, port: int, testing: bool) -> (success: bool) {
+  network.testing = testing
+
+  addr := find_device_ip(testing)
+
+  if !testing && addr == net.IP4_Loopback {
+    log_msg(&errorLogger, "Cannot broadcast on loopback; message stays local")
+    return false
+  }
+
+  sock, err := net.make_bound_udp_socket(net.IP4_Any, port)
+  net.set_blocking(sock, false)
+
+  if err != nil {
+    log_msg(&errorLogger, "Init network failed:", err)
+    return false
+  }
+
+  ok, discoveryPort, discovery := find_available_discovery_port(network)
+
+  log_msg(&debugLogger, "discovery port:", discoveryPort, "port:", port, "address:", addr)
+
+  err = net.set_blocking(discovery, false)
+  if err != nil {
+    log_msg(&errorLogger, err)
+    return false
+  }
 
   network ^= Network {
     discovery = discovery,
@@ -196,9 +219,11 @@ init_network :: proc(network: ^Network) {
     lobby = {},
     last_broadcast = time.now(),
   }
+
+  return true
 }
 
-create_lobby :: proc(network: ^Network, name: string) {
+create_local_lobby :: proc(network: ^Network, name: string) {
   network.lobby = Lobby {
     creatorIdx = 0,
     client_count = 1,
@@ -207,11 +232,14 @@ create_lobby :: proc(network: ^Network, name: string) {
   }
 
   copy_from_string(network.lobby.name_buf[0:len(name)], name)
-  
+
   network.lobby.clients[0] = Client {
     endpoint = network.myEndpoint,
   }
+}
 
+create_lobby :: proc(network: ^Network, name: string) {
+  create_local_lobby(network, name)
   broadcast_my_lobby_entry(network)
 }
 
@@ -246,9 +274,9 @@ broadcast_my_lobby_entry :: proc(network: ^Network) {
   if time.diff(network.last_broadcast, now) > time.Millisecond * 500 {
     network.last_broadcast = now
 
-    fmt.println("broadcasting")
+    //log_msg(&debugLogger, "broadcasting lobby entry")
 
-    payload: [256]u8 
+    payload: [256]u8
 
     copy(payload[0:PREFIX_SIZE], LOBBY_ENTRY_PREFIX)
     payload[PREFIX_SIZE] = network.lobby.name_len
@@ -313,10 +341,10 @@ bytes_to_lobby :: proc(payload: []u8) -> (ok: bool, size: u16, lobby: Lobby) {
   offset += u16(lobby.name_len)
 
   lobby.creatorIdx = payload[offset]
-  offset += 1 
+  offset += 1
 
   lobby.client_count = payload[offset]
-  offset += 1 
+  offset += 1
 
   for i in 0..<lobby.client_count {
     ok: bool
@@ -324,7 +352,7 @@ bytes_to_lobby :: proc(payload: []u8) -> (ok: bool, size: u16, lobby: Lobby) {
     ok, clientSize, lobby.clients[i] = bytes_to_client(payload[offset:])
 
     if !ok {
-      fmt.println("parse client failed")
+      log_msg(&errorLogger, "parse client failed")
       return false, 0, Lobby{}
     }
 
@@ -347,7 +375,7 @@ bytes_to_client :: proc(payload: []u8) -> (bool, u16, Client) {
 
 
   if !ok {
-    fmt.println("parse client IP failed")
+    log_msg(&errorLogger, "parse client IP failed")
     return false, 0, Client{}
   }
 
@@ -362,7 +390,7 @@ decode_endpoint :: proc(payload: []u8) -> (ok: bool, size: u16, endpoint: net.En
 
   if payload[2] == 4 {
     addressNumber := endian.unchecked_get_u32be(payload[3:7])
-    endpoint.address = transmute(net.IP4_Address)addressNumber 
+    endpoint.address = transmute(net.IP4_Address)addressNumber
   } else if payload[2] == 16 {
     assert(len(payload) >= 19)
 
@@ -370,7 +398,7 @@ decode_endpoint :: proc(payload: []u8) -> (ok: bool, size: u16, endpoint: net.En
     copy_slice(addressSlice[:], payload[3:19])
     endpoint.address = transmute(net.IP6_Address)addressSlice
   } else {
-    fmt.println("unkown IP format")
+    log_msg(&errorLogger, "Unknown IP format")
 
     return false, 0, endpoint
   }
@@ -397,7 +425,7 @@ encode_endpoint :: proc(endpoint: net.Endpoint, buf: []u8) -> u8 {
 
     bytes := transmute([16]u8)address
     copy_slice(buf[0:16], bytes[:])
-    
+
     return 2 + 1 + 16
   }
 
@@ -426,7 +454,7 @@ recieve_discovery_messages :: proc(network: ^Network) {
 
   if err != nil {
     if err != .Would_Block {
-      fmt.println(err)
+      log_msg(&errorLogger, err)
     }
     return
   }
@@ -454,7 +482,7 @@ accept_lobby_info :: proc(network: ^Network, payload: []u8){
     network.lobby = lobby
     network.state = .InLobby
   } else {
-    fmt.println("parse lobby info failed")
+    log_msg(&errorLogger, "Parse lobby info failed")
   }
 }
 
@@ -462,7 +490,7 @@ accept_join_lobby :: proc(network: ^Network, payload: []u8) {
   ok, size, client_endpoint := decode_endpoint(payload)
 
   if !ok {
-    fmt.println("client decode endpoint failed")
+    log_msg(&errorLogger, "Client decode endpoint failed")
     return
   }
 
@@ -543,7 +571,7 @@ update_network :: proc(network: ^Network, inputState: ^InputState) {
       rl.DrawRectangle(0, 0, rl.GetScreenWidth(), rl.GetScreenHeight(), rl.Color{
         0, 0, 0, 150
       })
-      
+
       buf: [2]u8
       buf[0] = network.lobby.client_count + '0'
       buf[1] = '\x00'
@@ -558,7 +586,7 @@ update_network :: proc(network: ^Network, inputState: ^InputState) {
           y = f32(rl.GetScreenHeight())/2 - 75,
           width = 150,
           height = 150,
-        }, "start", rl.GRAY) 
+        }, "start", rl.GRAY)
 
         if start {
           network.state = .Connected
@@ -577,8 +605,8 @@ update_network :: proc(network: ^Network, inputState: ^InputState) {
         f32(rl.GetScreenHeight())/2 - 75,
       }, 10)
 
-      lobby_count := network.lobbyEntryCount 
-  
+      lobby_count := network.lobbyEntryCount
+
       if button(&network.ui, inputState, rl.Rectangle{
         width = 150,
         height = 50,
@@ -586,7 +614,7 @@ update_network :: proc(network: ^Network, inputState: ^InputState) {
         request_join_lobby(network, network.lobbyEntries[0].endpoint)
         network.state = .WaitingForLobbyInfo
       }
-      
+
       if button(&network.ui, inputState, rl.Rectangle{
         width = 150,
         height = 50,
@@ -594,7 +622,7 @@ update_network :: proc(network: ^Network, inputState: ^InputState) {
         request_join_lobby(network, network.lobbyEntries[1].endpoint)
         network.state = .WaitingForLobbyInfo
       }
-      
+
       if button(&network.ui, inputState, rl.Rectangle{
         width = 150,
         height = 50,
@@ -602,7 +630,7 @@ update_network :: proc(network: ^Network, inputState: ^InputState) {
         request_join_lobby(network, network.lobbyEntries[2].endpoint)
         network.state = .WaitingForLobbyInfo
       }
-      
+
       if button(&network.ui, inputState, rl.Rectangle{
         width = 150,
         height = 50,
@@ -610,7 +638,7 @@ update_network :: proc(network: ^Network, inputState: ^InputState) {
         request_join_lobby(network, network.lobbyEntries[3].endpoint)
         network.state = .WaitingForLobbyInfo
       }
-      
+
       create_room := button(&network.ui, inputState, rl.Rectangle{
         width = 150,
         height = 50,
@@ -643,17 +671,16 @@ receive_input_state :: proc(network: ^Network, payload: []u8) {
   }
 
   network.lastPacketId = packet_id
-  
+
   if inputState.leftButton == .Pressed {
     syn_buf: [PREFIX_SIZE + 4]u8
     copy(syn_buf[0:PREFIX_SIZE], INPUTSTATESYN_PREFIX)
     endian.put_u32(syn_buf[PREFIX_SIZE:], .Big, packet_id)
-    
+
     _, err := net.send_udp(network.socket, syn_buf[:], endpoint)
 
     if err != nil {
-      fmt.println(err)
-      assert(false)
+      log_msg(&errorLogger, err)
     }
   }
 
@@ -672,7 +699,7 @@ reset_input_state :: proc(network: ^Network) {
 
 broadcast_input_state :: proc(network: ^Network, inputState: ^InputState) {
   buf: [PREFIX_SIZE + 17 + 19 + 4]u8
-  copy(buf[0:PREFIX_SIZE], INPUTSTATE_PREFIX) 
+  copy(buf[0:PREFIX_SIZE], INPUTSTATE_PREFIX)
   encodeInputState(inputState, buf[PREFIX_SIZE:])
   encode_endpoint(network.myEndpoint, buf[PREFIX_SIZE+17:])
 
@@ -734,7 +761,7 @@ broadcast_input_state_data :: proc(network: ^Network, endpoint: net.Endpoint, in
 
   _, err := net.send_udp(network.socket, buf[:], endpoint)
   if err != nil {
-    fmt.println(err)
+    log_msg(&errorLogger, err)
   }
 }
 
@@ -756,7 +783,7 @@ remove_acks :: proc(network: ^Network, buf: []u8) {
     network.acks.data[found] = network.acks.data[network.acks.length-1]
     network.acks.length -= 1
   } else {
-    fmt.println("random syn packet", packet_id)
+    log_msg(&errorLogger, "random syn packet", packet_id)
   }
 }
 
@@ -764,13 +791,13 @@ recieve_messages :: proc(network: ^Network) {
   for {
     buf: [1024]u8
     length, _, err := net.recv_udp(network.socket, buf[:])
-    
+
     if err == .Would_Block {
       break
     }
-      
+
     if err != nil {
-      fmt.println(err)
+      log_msg(&errorLogger, err)
       return
     }
 

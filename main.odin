@@ -1,6 +1,5 @@
 package main
 import "core:strconv"
-import "core:fmt"
 import rl "vendor:raylib"
 import "core:math"
 import la "core:math/linalg"
@@ -98,7 +97,7 @@ TileTypeStat :: struct {
 NA := max(u8)
 
 defaultTileTypeStats := [TileType]TileTypeStat{
-  .Free         = {NA, NA, NA, NA, 0,  NA}, 
+  .Free         = {NA, NA, NA, NA, 0,  NA},
   .Blocked      = {NA, NA, NA, NA, NA, NA},
   .Land         = {NA, NA, NA, 1,  0,  NA},
   .Cannon       = {NA, NA, NA, 1,  0,  NA},
@@ -115,7 +114,7 @@ defaultTileTypeStats := [TileType]TileTypeStat{
 }
 
 defaultBigTileTypeStats := [TileType]TileTypeStat{
-  .Free         = {NA, NA, NA, NA, 0,  NA}, 
+  .Free         = {NA, NA, NA, NA, 0,  NA},
   .Blocked      = {NA, NA, NA, NA, NA, NA},
   .Land         = {NA, NA, NA, 1,  0,  NA},
   .Cannon       = {NA, NA, NA, 2,  0,  NA},
@@ -143,6 +142,7 @@ GameStats :: struct {
 
 defaultGameStats := GameStats{
   energyPerRound = 3,
+  gameMode = .Normal,
 }
 
 Game :: struct {
@@ -203,13 +203,17 @@ click_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
   player := &game.players[currentPlayerIndex]
 
   if inputState.leftButton == .Pressed {
+    if rl.IsKeyDown(.LEFT_SHIFT) {
+      log_msg(&debugLogger, hovered_tile)
+    }
+
     if hovered_tile.type == .Cannon && hovered_tile.playerId - 1 == currentPlayerIndex {
       player.activeTileId = get_tile_id(halfgrid)
-      
+
       player.editMode = .Placing
       player.selectedTileType = .BlastTarget
     }
-    
+
     if (hovered_tile.type == .Mortar || hovered_tile.type == .Shield || hovered_tile.type == .Defense) && hovered_tile.playerId - 1 == currentPlayerIndex {
       player.activeTileId = get_tile_id(halfgrid)
     }
@@ -220,7 +224,7 @@ render_active_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIn
   player := &game.players[currentPlayerIndex]
 
   tile, pos := get_active_tile(&game.tileGrid, player)
-  
+
   if tile != nil && tile.type == .Mortar {
     row_layout(&game.ui, .Down, la.Vector2f32{inputState.screenSize.x - 10 - 150, inputState.screenSize.y / 2 - 52.5}, 5)
 
@@ -233,7 +237,7 @@ render_active_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIn
       tile.damage += game.tileTypeStats[.Mortar].scaling
       player.energy -= auto_cast game.tileTypeStats[.Mortar].scalingCost
     }
-    
+
     if (button(&game.ui, inputState, rl.Rectangle {
       width = 150,
       height = 50,
@@ -241,12 +245,12 @@ render_active_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIn
       player.editMode = .Placing
       player.selectedTileType = .MortarTarget
     }
-    
+
     row_layout_end(&game.ui)
   }
-  
+
   if tile != nil && tile.type == .Defense {
-    row_layout(&game.ui, .Down, la.Vector2f32{f32(rl.GetScreenWidth()) - 10 - 150, f32(rl.GetScreenHeight()) / 2 - 52.5}, 5)
+    row_layout(&game.ui, .Down, la.Vector2f32{inputState.screenSize.x - 10 - 150, inputState.screenSize.y / 2 - 52.5}, 5)
 
     buf: [32]u8
 
@@ -257,12 +261,12 @@ render_active_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIn
       tile.durability += game.tileTypeStats[.Defense].scaling
       player.energy -= auto_cast game.tileTypeStats[.Defense].scalingCost
     }
-    
+
     row_layout_end(&game.ui)
   }
 
   if tile != nil && tile.type == .Shield {
-    row_layout(&game.ui, .Down, la.Vector2f32{f32(rl.GetScreenWidth()) - 10 - 150, f32(rl.GetScreenHeight()) / 2 - 52.5}, 5)
+    row_layout(&game.ui, .Down, la.Vector2f32{inputState.screenSize.x - 10 - 150, inputState.screenSize.y / 2 - 52.5}, 5)
 
     if (button(&game.ui, inputState, rl.Rectangle {
       width = 150,
@@ -270,7 +274,7 @@ render_active_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIn
     }, "rotate", player.color)) {
       tile.direction = HexDirection((u8(tile.direction)+1)%6)
     }
-    
+
     row_layout_end(&game.ui)
   }
 }
@@ -374,7 +378,7 @@ place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
     player.selectedTileType = .BridgeEnd
     return
   }
-    
+
   if player.selectedTileType == .BridgeEnd {
     valid := false
 
@@ -404,7 +408,7 @@ place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
       damage = game.tileTypeStats[.BlastTarget].cost
     }, EntityType.Nuke)
   }
-  
+
   if player.selectedTileType == .MortarTarget && pay_active_tile_cost(game, player) {
     add_entity(game, currentPlayerIndex, halfgridPos, SimulationEntity {
       damage = activeTile.damage
@@ -413,7 +417,7 @@ place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
     player.activeTileId = 0
     player.editMode = .Clicking
   }
-   
+
   if player.selectedTileType == .BlastTarget && is_next && pay_active_tile_cost(game, player) {
     pos := get_screen_position(&game.tileGrid, activeTileHalfgridPos)
     fwd_pos := get_screen_position(&game.tileGrid, activeTileHalfgridPos - directions[dir])
@@ -434,7 +438,7 @@ place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
   }
 
   if player.selectedTileType != .Land && (tile.type != .Land || tile.playerId != currentPlayerIndex + 1) {
-    return 
+    return
   }
 
   if player.selectedTileType == .Land && (tile.type == .Land || !next_to_own_territory(game, currentPlayerIndex, halfgridPos)) {
@@ -446,9 +450,9 @@ place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
     tile.playerId = currentPlayerIndex + 1
     tile.type = player.selectedTileType
     tile.createdRound = u8(game.rounds)
-  
+
     tile.durability = game.tileTypeStats[tile.type].durability
-    
+
     if player.selectedTileType == .Mortar {
       tile.damage = game.tileTypeStats[.Mortar].damage
     }
@@ -463,8 +467,8 @@ place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
           get_tile(&game.tileGrid, pos).visibility[currentPlayerIndex] = .VeryVisible
         }
       }
-    } 
-  }   
+    }
+  }
 }
 
 randomDirection :: proc() -> HexDirection {
@@ -545,7 +549,9 @@ start_next_turn :: proc (game: ^Game, currentPlayerIndex: u8) {
     }
   }
 
-  fmt.println(all_done)
+  if all_done {
+    log_msg(&debugLogger, "All players confirmed end turn")
+  }
 
   if !all_done {
     return
@@ -567,7 +573,7 @@ ui_layout :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8) 
   ui := &game.ui
   // ui buttonstrip
   row_layout(ui, .Right, {10, 10}, 10)
-  
+
   player := &game.players[currentPlayerIndex]
 
   if (button(ui, inputState, rl.Rectangle {
@@ -577,7 +583,7 @@ ui_layout :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8) 
     player.selectedTileType = .Cannon
     player.editMode = .Placing
   }
-  
+
   if (button(ui, inputState, rl.Rectangle {
     width = 80,
     height = 75,
@@ -585,7 +591,7 @@ ui_layout :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8) 
     player.selectedTileType = .Land
     player.editMode = .Placing
   }
-  
+
   if (button(ui, inputState, rl.Rectangle {
     width = 80,
     height = 75,
@@ -593,7 +599,7 @@ ui_layout :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8) 
     player.selectedTileType = .Defense
     player.editMode = .Placing
   }
-  
+
   if (button(ui, inputState, rl.Rectangle {
     width = 80,
     height = 75,
@@ -610,7 +616,7 @@ ui_layout :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8) 
       player.selectedTileType = .Nuke
       player.editMode = .Placing
     }
-  //}  
+  //}
 
   if (button(ui, inputState, rl.Rectangle {
     width = 80,
@@ -619,7 +625,7 @@ ui_layout :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8) 
     player.selectedTileType = .Mortar
     player.editMode = .Placing
   }
-  
+
   if (button(ui, inputState, rl.Rectangle {
     width = 80,
     height = 75,
@@ -627,7 +633,7 @@ ui_layout :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8) 
     player.selectedTileType = .Telescope
     player.editMode = .Placing
   }
-  
+
   if (button(ui, inputState, rl.Rectangle {
     width = 80,
     height = 75,
@@ -635,7 +641,7 @@ ui_layout :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8) 
     player.selectedTileType = .BridgeStart
     player.editMode = .Placing
   }
-  
+
   if (button(ui, inputState, rl.Rectangle {
     width = 80,
     height = 75,
@@ -652,16 +658,16 @@ ui_layout :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8) 
   }
 
   row_layout_end(ui)
-  
-  row_layout(ui, .Left, {f32(rl.GetScreenWidth()-10), f32(rl.GetScreenHeight()-10) - 75}, 10)
-   
+
+  row_layout(ui, .Left, {f32(inputState.screenSize.x-10), f32(inputState.screenSize.y-10) - 75}, 10)
+
   if (button(ui, inputState, rl.Rectangle {
     width = 150,
     height = 75,
   }, "end turn", player.color)) {
     start_next_turn(game, currentPlayerIndex)
   }
-  
+
   if (button(ui, inputState, rl.Rectangle {
     width = 150,
     height = 75,
@@ -679,7 +685,7 @@ ui_layout :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8) 
       game.state = .GameSelector
     }
   }
- 
+
   row_layout_end(ui)
 
   row_layout(ui, .Right, la.Vector2f32 { 10, player.inputState.screenSize.y - 30 }, 10)
@@ -688,7 +694,7 @@ ui_layout :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8) 
     buf: [8]u8
     text_display(ui, { width = 20, height = 20 }, strconv.itoa(buf[:], int(game.rounds)), rl.BLACK)
   }
-  
+
   {
     buf: [8]u8
     str := strconv.itoa(buf[:], int(player.energy))
@@ -704,7 +710,7 @@ ui_layout :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8) 
     buf[len(str)+1] = 'e'
     text_display(ui, { width = 40, height = 20 }, cast(string)buf[:], rl.RED)
   }
-  
+
   {
     buf: [32]u8
     str: string
@@ -718,9 +724,9 @@ ui_layout :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8) 
 
     text_display(ui, { width = 40, height = 20 }, cast(string)buf[:len(str)+5], rl.BLACK)
   }
-  
+
   text_display(ui, rl.Rectangle { width = 20, height = 20 }, player.username, player.color)
-  
+
   row_layout_end(ui)
 }
 
@@ -740,7 +746,7 @@ apply_friction :: proc(v: ^la.Vector2f32, f: f32) {
   if abs(v.y) <= f {
     v.y = 0
   }
-  
+
   if abs(v.x) <= f {
     v.x = 0
   }
@@ -757,10 +763,10 @@ complete_entity :: proc(game: ^Game, entity: ^SimulationEntity) {
 
 damage_tile :: proc(game: ^Game, halfGridPos: HalfGridPosition, amount: u8) {
   tile := get_tile(&game.tileGrid, halfGridPos)
-  
+
   if tile.type == .Landmine {
     for direction in directions {
-      for i in 1..<3 { 
+      for i in 1..<3 {
         damagedTile := get_tile(&game.tileGrid, direction*i16(i) + halfGridPos)
         if tile.playerId != damagedTile.playerId {
           damage_tile(game, direction*i16(i) + halfGridPos, 2)
@@ -811,7 +817,7 @@ crown_winner :: proc(game: ^Game) {
     if tile.playerId == 0 {
       continue
     }
-    
+
     playerExists[tile.playerId - 1] = true
   }
 
@@ -824,7 +830,7 @@ crown_winner :: proc(game: ^Game) {
       lastPlayerCount += 1
     }
   }
-  
+
   if lastPlayerCount == 1 {
     assert(lastPlayerIdx >= 0)
     game.winnerIdx = u8(lastPlayerIdx)
@@ -845,16 +851,16 @@ simulate :: proc(game: ^Game, dt: f32) {
 
   for i in 0..<game.entity_count {
     entity := &game.entities[i]
-      
+
     if entity.completed {
       continue
     }
 
-    switch entity.type { 
+    switch entity.type {
     case .MortarShot:
       tile := get_tile(&game.tileGrid, entity.halfgridPos)
       damage_tile(game, entity.halfgridPos, entity.damage)
-      
+
       complete_entity(game, entity)
     case .Nuke:
       damage_tile(game, entity.halfgridPos, entity.damage)
@@ -864,7 +870,7 @@ simulate :: proc(game: ^Game, dt: f32) {
       }
 
       complete_entity(game, entity)
-    case .Shot: 
+    case .Shot:
       shot := &entity.shot
 
       prevpos := shot.position
@@ -886,7 +892,7 @@ simulate :: proc(game: ^Game, dt: f32) {
       if prev_tile != tile && prev_tile.playerId - 1 != entity.playerIndex {
         damage_tile(game, prevgridpos, entity.damage)
       }
-      
+
       if tile.type == .Shield {
         bounce_dir := directions[tile.direction]
 
@@ -897,7 +903,7 @@ simulate :: proc(game: ^Game, dt: f32) {
       }
 
       if !within_halfgrid_range(game.tileGrid.size, halfgridPos) {
-        complete_entity(game, entity)  
+        complete_entity(game, entity)
       }
 
       rl.DrawCircle(i32(shot.position.x), i32(shot.position.y), size, rl.BLACK)
@@ -917,7 +923,7 @@ iterate_field :: proc(iter: ^FieldIterator, tileGrid: ^TileGrid) -> ^Tile {
       iter.i += 1
       iter.j = 0
     }
-    
+
     if iter.i >= MAX_GRID_SIZE {
       return nil
     }
@@ -932,7 +938,7 @@ iterate_field :: proc(iter: ^FieldIterator, tileGrid: ^TileGrid) -> ^Tile {
     if within_halfgrid_range(tileGrid.size, {x, y}) {
       return get_tile(tileGrid, {x, y})
     }
-  }  
+  }
 }
 
 get_position :: proc(iter: ^FieldIterator) -> HalfGridPosition {
@@ -958,8 +964,8 @@ random_tile_type :: proc(randomSelection: []struct{
     if roll >= i && roll < i + selection.chanceRatio {
       type = selection.tile
       break;
-    } 
-    
+    }
+
     i += selection.chanceRatio
   }
 
@@ -993,7 +999,7 @@ free_field :: proc(tileGrid: ^TileGrid) {
 
 update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool) {
   player := &game.players[currentPlayerIndex]
-   
+
   if game.state != .GameSelector {
     update_tilegrid_offset(&game.tileGrid, player.inputState)
 
@@ -1013,19 +1019,22 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
       width = 150,
       height = 150,
     }, "mini", rl.GRAY)) {
+      game.stats = defaultGameStats
+      game.tileTypeStats = defaultTileTypeStats
+
       game.tileGrid = TileGrid {
         size = 6,
         hexagonSize = hexagonSize,
       }
 
       free_field(&game.tileGrid)
-     
+
       get_tile(&game.tileGrid, {2, 2})^ = Tile {
         playerId = 1,
         type = .Land,
         visibility = {},
       }
-      
+
       get_tile(&game.tileGrid, {-2, -2})^ = Tile {
         playerId = 2,
         type = .Land,
@@ -1035,34 +1044,35 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
       force_start_next_turn(game)
       assign_tile_limits(game)
     }
-    
+
     if (button(&game.ui, player.inputState, rl.Rectangle{
       x = player.inputState.screenSize.x/2 - 75,
       y = player.inputState.screenSize.y/2 + 75,
       width = 150,
       height = 150,
     }, "solo", rl.GRAY)) {
+      game.stats = defaultGameStats
       game.tileTypeStats = defaultBigTileTypeStats
 
       game.tileGrid = TileGrid {
         size = 9,
         hexagonSize = hexagonSize,
       }
-      
+
       randomize_field(&game.tileGrid)
-     
+
       get_tile(&game.tileGrid, {0, 0})^ = Tile {
         playerId = 1,
         type = .Land,
         visibility = {},
       }
-      
+
       get_tile(&game.tileGrid, {0, 8})^ = Tile {
         playerId = 2,
         type = .Land,
         visibility = {},
       }
-      
+
       get_tile(&game.tileGrid, {0, -8})^ = Tile {
         playerId = 2,
         type = .Land,
@@ -1080,7 +1090,7 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
         type = .Land,
         visibility = {},
       }
-      
+
       game.stats.energyPerRound = 10
       game.stats.gameMode = .Solo
 
@@ -1095,31 +1105,32 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
       height = 150,
     }, "megarandom", rl.GRAY)) {
       game.tileTypeStats = defaultBigTileTypeStats
+      game.stats = defaultGameStats
 
       game.tileGrid = TileGrid {
         size = 9,
         hexagonSize = hexagonSize,
       }
-      
+
       randomize_field(&game.tileGrid)
-     
+
       get_tile(&game.tileGrid, {3, 3})^ = Tile {
         playerId = 1,
         type = .Land,
         visibility = {},
       }
-      
+
       get_tile(&game.tileGrid, {-3, -3})^ = Tile {
         playerId = 2,
         type = .Land,
         visibility = {},
       }
-      
+
       game.stats.energyPerRound = 10
       force_start_next_turn(game)
       assign_tile_limits(game)
     }
-    
+
     if (button(&game.ui, player.inputState, rl.Rectangle{
       x = player.inputState.screenSize.x/2 + 75,
       y = player.inputState.screenSize.y/2 - 75,
@@ -1127,31 +1138,32 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
       height = 150,
     }, "big", rl.GRAY)) {
       game.tileTypeStats = defaultBigTileTypeStats
+      game.stats = defaultGameStats
 
       game.tileGrid = TileGrid {
         size = 8,
         hexagonSize = hexagonSize,
       }
-      
+
       free_field(&game.tileGrid)
-     
+
       get_tile(&game.tileGrid, {3, 3})^ = Tile {
         playerId = 1,
         type = .Land,
         visibility = {},
       }
-      
+
       get_tile(&game.tileGrid, {-3, -3})^ = Tile {
         playerId = 2,
         type = .Land,
         visibility = {},
       }
-      
+
       game.stats.energyPerRound = 10
       force_start_next_turn(game)
       assign_tile_limits(game)
     }
-    
+
     if (button(&game.ui, player.inputState, rl.Rectangle{
       x = player.inputState.screenSize.x/2 - 225,
       y = player.inputState.screenSize.y/2 - 75,
@@ -1159,6 +1171,7 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
       height = 150,
     }, "random", rl.GRAY)) {
       game.tileTypeStats = defaultBigTileTypeStats
+      game.stats = defaultGameStats
 
       game.tileGrid = TileGrid {
         size = 8,
@@ -1166,21 +1179,21 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
       }
 
       randomize_field(&game.tileGrid)
-     
+
       get_tile(&game.tileGrid, {3, 3})^ = Tile {
         playerId = 1,
         type = .Land,
         visibility = {},
       }
-      
+
       get_tile(&game.tileGrid, {-3, -3})^ = Tile {
         playerId = 2,
         type = .Land,
         visibility = {},
       }
-      
+
       force_start_next_turn(game)
-      assign_tile_limits(game) 
+      assign_tile_limits(game)
     }
 
     if (button(&game.ui, player.inputState, rl.Rectangle{
@@ -1192,7 +1205,7 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
       game.seed += 1
       rand.reset(game.seed)
     }
-    
+
     rl.DrawCircle(i32(player.inputState.mousePos.x), i32(player.inputState.mousePos.y), 12, rl.BLACK)
   case .Winner:
     within_button := within_button(&game.ui, player.inputState, rl.Rectangle{
@@ -1204,7 +1217,7 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
 
     if (!within_button || player.inputState.leftButton == .Up) {
       if !virtual {
-        rl.DrawRectangle(0, 0, rl.GetScreenWidth(), rl.GetScreenHeight(), rl.Color{
+        rl.DrawRectangle(0, 0, auto_cast player.inputState.screenSize.x, auto_cast player.inputState.screenSize.y, rl.Color{
           0, 0, 0, 150
         })
       }
@@ -1258,18 +1271,21 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
       case .Clicking:
         click_tile(game, player.inputState, currentPlayerIndex)
         render_active_tile(game, player.inputState, currentPlayerIndex)
-    }        
+    }
 
     ui_layout(game, player.inputState, currentPlayerIndex)
 
     hover_tilegrid(&game.tileGrid, player.inputState, player, &game.ui, virtual)
-  }    
+  }
 }
 
 AppState :: enum {
   Connecting,
   Playing,
 }
+  
+errorLogger: FileLogger
+debugLogger: FileLogger
 
 App :: struct {
   network: Network,
@@ -1278,6 +1294,7 @@ App :: struct {
   state: AppState,
   playerCount: u8,
   playerIndex: u8,
+  inputLogger: FileLogger,
 }
 
 MouseState :: enum {
@@ -1292,10 +1309,6 @@ InputState :: struct {
   leftButton: MouseState,
 }
 
-init_app :: proc(app: ^App) {
-  init_network(&app.network)
-}
-
 get_button_state :: proc() -> MouseState {
   if rl.IsMouseButtonPressed(.LEFT) {
     return .Pressed
@@ -1304,7 +1317,7 @@ get_button_state :: proc() -> MouseState {
   if rl.IsMouseButtonDown(.LEFT) {
     return .Down
   }
-   
+
   if rl.IsMouseButtonUp(.LEFT) {
     return .Up
   }
@@ -1313,10 +1326,11 @@ get_button_state :: proc() -> MouseState {
 }
 
 get_input_state :: proc() -> InputState {
+  screenSize := la.Vector2f32{f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())}
   return InputState {
     mousePos = rl.GetMousePosition(),
     leftButton = get_button_state(),
-    screenSize = la.Vector2f32{f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())}, 
+    screenSize = screenSize,
   }
 }
 
@@ -1326,25 +1340,45 @@ init_game :: proc(app: ^App, myInputState: ^InputState) {
 
   app.playerCount = app.network.lobby.client_count
   app.playerIndex = get_client_player_idx(&app.network)
-  
+
   app.gameInstance.playerCount = app.playerCount
-  
+
   for i in 0..<app.playerCount {
     client := &app.network.lobby.clients[i]
     app.playerNames[i] = string(client.name_buf[:client.name_len])
     app.gameInstance.players[i].inputState = &app.network.lobby.inputStates[i]
-  }  
-  
+  }
+
   app.gameInstance.tileTypeStats = defaultTileTypeStats
   app.gameInstance.stats = defaultGameStats
- 
+
   for playerName, i in app.playerNames {
     player := &app.gameInstance.players[i]
 
     player.color = playerColors[i]
     player.username = app.playerNames[i]
     player.selectedTileType = .Land
-  }  
+  }
+}
+
+init_app :: proc(app: ^App) {
+  port, testing, clearlogs := parse_cli_args()
+
+  assert(init_log(&errorLogger, "./logs/error.txt", clearlogs))
+  assert(init_log(&debugLogger, "./logs/debug.txt", clearlogs))
+  assert(init_log(&app.inputLogger, "./logs/input.txt", clearlogs))
+
+  if !clearlogs {
+    log_msg(&debugLogger, "New Session")
+    log_msg(&errorLogger, "New Session")
+  }
+   
+  log_msg(&debugLogger, "testing:", testing)
+
+  if (!init_network(&app.network, port, testing)) {
+    app.state = .Playing
+    create_local_lobby(&app.network, "my lobby")
+  }
 }
 
 update_app :: proc(app: ^App, dt: f32) {
@@ -1356,16 +1390,17 @@ update_app :: proc(app: ^App, dt: f32) {
     for i in 0..<app.playerCount {
       virtual := i != app.playerIndex
 
+      update_tilegrid_offset(&app.gameInstance.tileGrid, &myInputState)
+
       if !virtual {
-        update_tilegrid_offset(&app.gameInstance.tileGrid, &myInputState)
         app.network.lobby.inputStates[i] = myInputState
       }
 
       app.gameInstance.ui.virtual = virtual
-  
+
       update_game(&app.gameInstance, dt, u8(i), virtual)
-    } 
-  case .Connecting:  
+    }
+  case .Connecting:
     if app.network.state == .Connected {
       app.state = .Playing
       init_game(app, &myInputState)
