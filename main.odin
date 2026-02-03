@@ -4,6 +4,7 @@ import rl "vendor:raylib"
 import "core:math"
 import la "core:math/linalg"
 import "core:math/rand"
+import "core:fmt"
 
 CANNONBALL_SPEED :: 4
 MAX_PLAYERS :: 4
@@ -26,9 +27,10 @@ TileType :: enum {
 }
 
 Visibility :: [MAX_PLAYERS]enum {
-  Invisible,
-  Visible,
-  VeryVisible,
+  Invisible = 0,
+  LandVisible = 1,
+  Visible = 2,
+  VeryVisible = 3,
 }
 
 Cannon :: struct {
@@ -130,10 +132,10 @@ defaultBigTileTypeStats := [TileType]TileTypeStat{
   .Landmine     = {NA, NA, 2,  4,  0,  NA},
 }
 
-GameMode :: enum {
-  Normal,
+GameMode :: bit_set[enum {
+  LandAhoy,
   Solo,
-}
+}]
 
 GameStats :: struct {
   energyPerRound: u16,
@@ -142,7 +144,7 @@ GameStats :: struct {
 
 defaultGameStats := GameStats{
   energyPerRound = 3,
-  gameMode = .Normal,
+  gameMode = {.LandAhoy},
 }
 
 Game :: struct {
@@ -375,6 +377,7 @@ place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
     tile.playerId = currentPlayerIndex+1
     tile.type = .BridgeStart
     tile.createdRound = u8(game.rounds)
+    tile.visibility[currentPlayerIndex] = .VeryVisible
     player.selectedTileType = .BridgeEnd
     return
   }
@@ -399,6 +402,7 @@ place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
     tile.playerId = currentPlayerIndex+1
     tile.type = .Land
     tile.createdRound = u8(game.rounds)
+    tile.visibility[currentPlayerIndex] = .VeryVisible
     player.editMode = .Clicking
     return
   }
@@ -446,15 +450,28 @@ place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
   }
 
   if pay_active_tile_cost(game, player) {
-    tile.visibility[currentPlayerIndex] = .Invisible
+    tile.visibility[currentPlayerIndex] = .VeryVisible
     tile.playerId = currentPlayerIndex + 1
     tile.type = player.selectedTileType
     tile.createdRound = u8(game.rounds)
-
     tile.durability = game.tileTypeStats[tile.type].durability
 
     if player.selectedTileType == .Mortar {
       tile.damage = game.tileTypeStats[.Mortar].damage
+    }
+
+    if tile.type == .Land {
+      for dir in directions {
+        for i in 1..<i16(3) {
+          pos := halfgridPos + dir * i
+          tile := get_tile(&game.tileGrid, pos)
+          visibility := &tile.visibility[currentPlayerIndex]
+
+          if within_game_bounds(game, pos) && visibility^ < .LandVisible {
+            visibility^ = .LandVisible
+          }
+        }
+      }
     }
 
     if tile.type == .Telescope {
@@ -523,7 +540,7 @@ update_solo_boss :: proc (game: ^Game) {
 force_start_next_turn :: proc (game: ^Game) {
   crown_winner(game)
 
-  if game.stats.gameMode == .Solo {
+  if .Solo in game.stats.gameMode {
     update_solo_boss(game)
   }
 
@@ -796,7 +813,7 @@ damage_tile :: proc(game: ^Game, halfGridPos: HalfGridPosition, amount: u8) {
   }
 
   for i in 0..<MAX_PLAYERS {
-    if tile.visibility[i] == .Invisible {
+    if tile.visibility[i] < .Visible {
       tile.visibility[i] = .Visible
     }
   }
@@ -1008,6 +1025,18 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
     }
   }
 
+  create_player_land :: proc(tileGrid: ^TileGrid, id: u8, haldGridPos: HalfGridPosition) {
+    tile := get_tile(tileGrid, haldGridPos)
+
+    tile^ = Tile {
+      playerId = id,
+      type = .Land,
+      visibility = {},
+    }
+
+    tile.visibility[id-1] = .VeryVisible
+  }
+
   switch game.state {
   case .GameSelector:
     //TODO
@@ -1029,17 +1058,8 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
 
       free_field(&game.tileGrid)
 
-      get_tile(&game.tileGrid, {2, 2})^ = Tile {
-        playerId = 1,
-        type = .Land,
-        visibility = {},
-      }
-
-      get_tile(&game.tileGrid, {-2, -2})^ = Tile {
-        playerId = 2,
-        type = .Land,
-        visibility = {},
-      }
+      create_player_land(&game.tileGrid, 1, {2, 2})
+      create_player_land(&game.tileGrid, 2, {-2, -2})
 
       force_start_next_turn(game)
       assign_tile_limits(game)
@@ -1060,39 +1080,16 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
       }
 
       randomize_field(&game.tileGrid)
+      
+      create_player_land(&game.tileGrid, 1, {0, 0})
 
-      get_tile(&game.tileGrid, {0, 0})^ = Tile {
-        playerId = 1,
-        type = .Land,
-        visibility = {},
-      }
-
-      get_tile(&game.tileGrid, {0, 8})^ = Tile {
-        playerId = 2,
-        type = .Land,
-        visibility = {},
-      }
-
-      get_tile(&game.tileGrid, {0, -8})^ = Tile {
-        playerId = 2,
-        type = .Land,
-        visibility = {},
-      }
-
-      get_tile(&game.tileGrid, {4, 0})^ = Tile {
-        playerId = 2,
-        type = .Land,
-        visibility = {},
-      }
-
-      get_tile(&game.tileGrid, {-4, 0})^ = Tile {
-        playerId = 2,
-        type = .Land,
-        visibility = {},
-      }
+      create_player_land(&game.tileGrid, 2, {0, 8})
+      create_player_land(&game.tileGrid, 2, {0, -8})
+      create_player_land(&game.tileGrid, 2, {4, 0})
+      create_player_land(&game.tileGrid, 2, {-4, 0})
 
       game.stats.energyPerRound = 10
-      game.stats.gameMode = .Solo
+      game.stats.gameMode += {.Solo}
 
       force_start_next_turn(game)
       assign_tile_limits(game)
@@ -1103,7 +1100,7 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
       y = player.inputState.screenSize.y/2 + 75,
       width = 150,
       height = 150,
-    }, "megarandom", rl.GRAY)) {
+    }, "mega", rl.GRAY)) {
       game.tileTypeStats = defaultBigTileTypeStats
       game.stats = defaultGameStats
 
@@ -1114,19 +1111,35 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
 
       randomize_field(&game.tileGrid)
 
-      get_tile(&game.tileGrid, {3, 3})^ = Tile {
-        playerId = 1,
-        type = .Land,
-        visibility = {},
-      }
-
-      get_tile(&game.tileGrid, {-3, -3})^ = Tile {
-        playerId = 2,
-        type = .Land,
-        visibility = {},
-      }
+      create_player_land(&game.tileGrid, 1, {3, 3})
+      create_player_land(&game.tileGrid, 2, {-3, -3})
 
       game.stats.energyPerRound = 10
+      force_start_next_turn(game)
+      assign_tile_limits(game)
+    }
+    
+    if (button(&game.ui, player.inputState, rl.Rectangle{
+      x = player.inputState.screenSize.x/2 - 225,
+      y = player.inputState.screenSize.y/2 + 75,
+      width = 150,
+      height = 150,
+    }, "fog of war", rl.GRAY)) {
+      game.tileTypeStats = defaultBigTileTypeStats
+      game.stats = defaultGameStats
+      game.stats.gameMode -= { .LandAhoy }
+
+      game.tileGrid = TileGrid {
+        size = 8,
+        hexagonSize = hexagonSize,
+      }
+
+      randomize_field(&game.tileGrid)
+
+      create_player_land(&game.tileGrid, 1, {2, 2})
+      create_player_land(&game.tileGrid, 2, {-2, -2})
+
+      game.stats.energyPerRound = 8
       force_start_next_turn(game)
       assign_tile_limits(game)
     }
@@ -1147,17 +1160,8 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
 
       free_field(&game.tileGrid)
 
-      get_tile(&game.tileGrid, {3, 3})^ = Tile {
-        playerId = 1,
-        type = .Land,
-        visibility = {},
-      }
-
-      get_tile(&game.tileGrid, {-3, -3})^ = Tile {
-        playerId = 2,
-        type = .Land,
-        visibility = {},
-      }
+      create_player_land(&game.tileGrid, 1, {3, 3})
+      create_player_land(&game.tileGrid, 2, {-3, -3})
 
       game.stats.energyPerRound = 10
       force_start_next_turn(game)
@@ -1180,17 +1184,8 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
 
       randomize_field(&game.tileGrid)
 
-      get_tile(&game.tileGrid, {3, 3})^ = Tile {
-        playerId = 1,
-        type = .Land,
-        visibility = {},
-      }
-
-      get_tile(&game.tileGrid, {-3, -3})^ = Tile {
-        playerId = 2,
-        type = .Land,
-        visibility = {},
-      }
+      create_player_land(&game.tileGrid, 1, {3, 3})
+      create_player_land(&game.tileGrid, 2, {-3, -3})
 
       force_start_next_turn(game)
       assign_tile_limits(game)
