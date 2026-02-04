@@ -1,10 +1,10 @@
 package main
 import "core:strconv"
+import "core:crypto/_aes"
 import rl "vendor:raylib"
 import "core:math"
 import la "core:math/linalg"
 import "core:math/rand"
-import "core:fmt"
 
 CANNONBALL_SPEED :: 4
 MAX_PLAYERS :: 4
@@ -354,35 +354,34 @@ next_to_own_territory :: proc(game: ^Game, currentPlayerIndex: u8, halfGridPos: 
 }
 
 place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8) {
-  player := &game.players[currentPlayerIndex]
+  if inputState.leftButton != .Pressed {
+    return
+  }
+
   within_bounds, halfgridPos := get_tile_grid_pos_safe(&game.tileGrid, inputState.mousePos)
 
   if !within_bounds {
     return
   }
-
+  
   tile := get_tile(&game.tileGrid, halfgridPos)
-  activeTile, activeTileHalfgridPos := get_active_tile(&game.tileGrid, player)
-  is_next, dir := next_to(halfgridPos, activeTileHalfgridPos)
-
+  
   if tile.type == .Blocked {
     return
   }
+  
+  player := &game.players[currentPlayerIndex]
+  activeTile, activeTileHalfgridPos := get_active_tile(&game.tileGrid, player)
+  nextToActiveTile, dir := next_to(halfgridPos, activeTileHalfgridPos)
 
-  if inputState.leftButton != .Pressed {
-    return
-  }
-
-  if player.selectedTileType == .BridgeStart && next_to_own_territory(game, currentPlayerIndex, halfgridPos) && pay_active_tile_cost(game, player) {
-    tile.playerId = currentPlayerIndex+1
-    tile.type = .BridgeStart
-    tile.createdRound = u8(game.rounds)
-    tile.visibility[currentPlayerIndex] = .VeryVisible
-    player.selectedTileType = .BridgeEnd
-    return
-  }
-
-  if player.selectedTileType == .BridgeEnd {
+  switch player.selectedTileType {
+  case .BridgeStart:
+    if next_to_own_territory(game, currentPlayerIndex, halfgridPos) && pay_active_tile_cost(game, player) {
+      create_player_land(game, currentPlayerIndex+1, halfgridPos)
+      get_tile(&game.tileGrid, halfgridPos).type = .BridgeStart
+      player.selectedTileType = .BridgeEnd
+    }
+  case .BridgeEnd:
     valid := false
 
     for direction in directions {
@@ -395,96 +394,73 @@ place_tile :: proc(game: ^Game, inputState: ^InputState, currentPlayerIndex: u8)
       }
     }
 
-    if valid == false {
-      return
+    if valid {
+      create_player_land(game, currentPlayerIndex+1, halfgridPos)
     }
-
-    tile.playerId = currentPlayerIndex+1
-    tile.type = .Land
-    tile.createdRound = u8(game.rounds)
-    tile.visibility[currentPlayerIndex] = .VeryVisible
-    player.editMode = .Clicking
-    return
-  }
-
-  if player.selectedTileType == .Nuke && pay_active_tile_cost(game, player) {
-    add_entity(game, currentPlayerIndex, halfgridPos, SimulationEntity {
-      damage = game.tileTypeStats[.BlastTarget].cost
-    }, EntityType.Nuke)
-  }
-
-  if player.selectedTileType == .MortarTarget && pay_active_tile_cost(game, player) {
-    add_entity(game, currentPlayerIndex, halfgridPos, SimulationEntity {
-      damage = activeTile.damage
-    }, EntityType.MortarShot)
-
-    player.activeTileId = 0
-    player.editMode = .Clicking
-  }
-
-  if player.selectedTileType == .BlastTarget && is_next && pay_active_tile_cost(game, player) {
-    pos := get_screen_position(&game.tileGrid, activeTileHalfgridPos)
-    fwd_pos := get_screen_position(&game.tileGrid, activeTileHalfgridPos - directions[dir])
-    vel := (fwd_pos - pos)
-
-    add_entity(game, currentPlayerIndex, halfgridPos, SimulationEntity {
-      shot = Shot {
-        velocity = vel * CANNONBALL_SPEED,
-        position = fwd_pos + (pos - fwd_pos) * 0.25
-      },
-      damage = game.tileTypeStats[.BlastTarget].damage
-    }, EntityType.Shot)
-
-    player.activeTileId = 0
-    player.editMode = .Clicking
-
-    return
-  }
-
-  if player.selectedTileType != .Land && (tile.type != .Land || tile.playerId != currentPlayerIndex + 1) {
-    return
-  }
-
-  if player.selectedTileType == .Land && (tile.type == .Land || !next_to_own_territory(game, currentPlayerIndex, halfgridPos)) {
-    return
-  }
-
-  if pay_active_tile_cost(game, player) {
-    tile.visibility[currentPlayerIndex] = .VeryVisible
-    tile.playerId = currentPlayerIndex + 1
-    tile.type = player.selectedTileType
-    tile.createdRound = u8(game.rounds)
-    tile.durability = game.tileTypeStats[tile.type].durability
-
-    if player.selectedTileType == .Mortar {
-      tile.damage = game.tileTypeStats[.Mortar].damage
+  case .Nuke:
+    if pay_active_tile_cost(game, player) {
+      add_entity(game, currentPlayerIndex, halfgridPos, SimulationEntity {
+        damage = game.tileTypeStats[.BlastTarget].cost
+      }, EntityType.Nuke)
     }
+  case .MortarTarget:
+    if pay_active_tile_cost(game, player) {
+      add_entity(game, currentPlayerIndex, halfgridPos, SimulationEntity {
+        damage = activeTile.damage
+      }, EntityType.MortarShot)
 
-    if tile.type == .Land {
-      for dir in directions {
-        for i in 1..<i16(3) {
-          pos := halfgridPos + dir * i
-          tile := get_tile(&game.tileGrid, pos)
-          visibility := &tile.visibility[currentPlayerIndex]
+      player.activeTileId = 0
+      player.editMode = .Clicking
+    }
+  case .BlastTarget:
+    if nextToActiveTile && pay_active_tile_cost(game, player) {
+      pos := get_screen_position(&game.tileGrid, activeTileHalfgridPos)
+      fwd_pos := get_screen_position(&game.tileGrid, activeTileHalfgridPos - directions[dir])
+      vel := (fwd_pos - pos)
 
-          if within_game_bounds(game, pos) && visibility^ < .LandVisible {
-            visibility^ = .LandVisible
+      add_entity(game, currentPlayerIndex, halfgridPos, SimulationEntity {
+        shot = Shot {
+          velocity = vel * CANNONBALL_SPEED,
+          position = fwd_pos + (pos - fwd_pos) * 0.25
+        },
+        damage = game.tileTypeStats[.BlastTarget].damage
+      }, EntityType.Shot)
+
+      player.activeTileId = 0
+      player.editMode = .Clicking
+    }
+  case .Land:
+    if tile.type != .Land && next_to_own_territory(game, currentPlayerIndex, halfgridPos) && pay_active_tile_cost(game, player) {
+      create_player_land(game, currentPlayerIndex+1, halfgridPos)
+    }
+  case .Cannon, .Mortar, .Shield, .Defense, .Landmine, .Telescope:
+    if tile.type == .Land && tile.playerId == currentPlayerIndex+1 && pay_active_tile_cost(game, player) {
+      tile.visibility[currentPlayerIndex] = .VeryVisible
+      tile.playerId = currentPlayerIndex + 1
+      tile.type = player.selectedTileType
+      tile.createdRound = u8(game.rounds)
+      tile.durability = game.tileTypeStats[tile.type].durability
+
+      #partial switch player.selectedTileType {
+      case .Telescope:
+        for dir in directions {
+          pos := halfgridPos
+
+          for within_game_bounds(game, pos) {
+            pos += dir
+
+            get_tile(&game.tileGrid, pos).visibility[currentPlayerIndex] = .VeryVisible
           }
         }
+      case .Mortar:
+        tile.damage = game.tileTypeStats[.Mortar].damage
+      case .Cannon, .Shield, .Defense, .Landmine:
+      case:
+        unreachable()
       }
     }
-
-    if tile.type == .Telescope {
-      for dir in directions {
-        pos := halfgridPos
-
-        for within_game_bounds(game, pos) {
-          pos += dir
-
-          get_tile(&game.tileGrid, pos).visibility[currentPlayerIndex] = .VeryVisible
-        }
-      }
-    }
+  case .Blocked, .Free:
+    unreachable()
   }
 }
 
@@ -1014,6 +990,45 @@ free_field :: proc(tileGrid: ^TileGrid) {
   }
 }
 
+create_player_land :: proc(game: ^Game, id: u8, haldGridPos: HalfGridPosition) {
+  tile := get_tile(&game.tileGrid, haldGridPos)
+
+  tile^ = Tile {
+    playerId = id,
+    type = .Land,
+    createdRound = u8(game.rounds),
+    durability = game.tileTypeStats[tile.type].durability,
+    visibility = {},
+  }
+  
+  if id != 0 {
+    tile.visibility[id-1] = .VeryVisible
+  }
+
+  for dir in directions {
+    for i in 1..<i16(3) {
+      pos := haldGridPos + dir * i
+      nextTile := get_tile(&game.tileGrid, pos)
+
+      if nextTile.playerId != 0 {
+        their_visibility := &tile.visibility[nextTile.playerId-1]
+
+        if within_game_bounds(game, pos) && their_visibility^ < .LandVisible {
+          their_visibility^ = .LandVisible
+        }
+      }
+
+      if id != 0 {
+        visibility := &nextTile.visibility[id - 1]
+
+        if within_game_bounds(game, pos) && visibility^ < .LandVisible {
+          visibility^ = .LandVisible
+        }
+      }
+    }
+  }
+}
+
 update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool) {
   player := &game.players[currentPlayerIndex]
 
@@ -1023,18 +1038,6 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
     if !virtual {
       render_gameboard(game, currentPlayerIndex)
     }
-  }
-
-  create_player_land :: proc(tileGrid: ^TileGrid, id: u8, haldGridPos: HalfGridPosition) {
-    tile := get_tile(tileGrid, haldGridPos)
-
-    tile^ = Tile {
-      playerId = id,
-      type = .Land,
-      visibility = {},
-    }
-
-    tile.visibility[id-1] = .VeryVisible
   }
 
   switch game.state {
@@ -1058,8 +1061,8 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
 
       free_field(&game.tileGrid)
 
-      create_player_land(&game.tileGrid, 1, {2, 2})
-      create_player_land(&game.tileGrid, 2, {-2, -2})
+      create_player_land(game, 1, {2, 2})
+      create_player_land(game, 2, {-2, -2})
 
       force_start_next_turn(game)
       assign_tile_limits(game)
@@ -1081,12 +1084,12 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
 
       randomize_field(&game.tileGrid)
       
-      create_player_land(&game.tileGrid, 1, {0, 0})
+      create_player_land(game, 1, {0, 0})
 
-      create_player_land(&game.tileGrid, 2, {0, 8})
-      create_player_land(&game.tileGrid, 2, {0, -8})
-      create_player_land(&game.tileGrid, 2, {4, 0})
-      create_player_land(&game.tileGrid, 2, {-4, 0})
+      create_player_land(game, 2, {0, 8})
+      create_player_land(game, 2, {0, -8})
+      create_player_land(game, 2, {4, 0})
+      create_player_land(game, 2, {-4, 0})
 
       game.stats.energyPerRound = 10
       game.stats.gameMode += {.Solo}
@@ -1111,8 +1114,8 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
 
       randomize_field(&game.tileGrid)
 
-      create_player_land(&game.tileGrid, 1, {3, 3})
-      create_player_land(&game.tileGrid, 2, {-3, -3})
+      create_player_land(game, 1, {3, 3})
+      create_player_land(game, 2, {-3, -3})
 
       game.stats.energyPerRound = 10
       force_start_next_turn(game)
@@ -1136,8 +1139,8 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
 
       randomize_field(&game.tileGrid)
 
-      create_player_land(&game.tileGrid, 1, {2, 2})
-      create_player_land(&game.tileGrid, 2, {-2, -2})
+      create_player_land(game, 1, {2, 2})
+      create_player_land(game, 2, {-2, -2})
 
       game.stats.energyPerRound = 8
       force_start_next_turn(game)
@@ -1160,8 +1163,8 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
 
       free_field(&game.tileGrid)
 
-      create_player_land(&game.tileGrid, 1, {3, 3})
-      create_player_land(&game.tileGrid, 2, {-3, -3})
+      create_player_land(game, 1, {3, 3})
+      create_player_land(game, 2, {-3, -3})
 
       game.stats.energyPerRound = 10
       force_start_next_turn(game)
@@ -1184,8 +1187,8 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8, virtual: bool)
 
       randomize_field(&game.tileGrid)
 
-      create_player_land(&game.tileGrid, 1, {3, 3})
-      create_player_land(&game.tileGrid, 2, {-3, -3})
+      create_player_land(game, 1, {3, 3})
+      create_player_land(game, 2, {-3, -3})
 
       force_start_next_turn(game)
       assign_tile_limits(game)
