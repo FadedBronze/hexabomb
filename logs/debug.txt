@@ -1,6 +1,2 @@
-[2026-02-04 02:21:46.967495700 +0000 UTC](C:/Code/odin/hexabomb/main.odin(1374:3)) ["testing:", true]
-[2026-02-04 02:21:46.971055500 +0000 UTC](C:/Code/odin/hexabomb/network.odin(206:3)) ["discovery port:", 4001, "port:", 6970, "address:", [127, 0, 0, 1]]
-[2026-02-04 02:23:18.840586700 +0000 UTC](C:/Code/odin/hexabomb/main.odin(546:5)) ["All players confirmed end turn"]
-[2026-02-04 02:23:18.840908800 +0000 UTC](C:/Code/odin/hexabomb/main.odin(546:5)) ["All players confirmed end turn"]
-[2026-02-04 02:24:41.956192000 +0000 UTC](C:/Code/odin/hexabomb/main.odin(546:5)) ["All players confirmed end turn"]
-[2026-02-04 02:24:41.957074200 +0000 UTC](C:/Code/odin/hexabomb/main.odin(546:5)) ["All players confirmed end turn"]
+[2026-02-14 14:55:27.825700900 +0000 UTC](C:/Code/odin/hexabomb/main.odin(1383:9)) ["New Session"]
+[2026-02-14 14:55:27.827089700 +0000 UTC](C:/Code/odin/hexabomb/main.odin(1432:5)) ["single machine testing:", false]
