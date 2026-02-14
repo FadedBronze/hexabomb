@@ -77,8 +77,8 @@ get_packet_type :: proc(packet: ^Packet($I)) -> PacketType {
 }
 
 throttle_ms := [PacketType]u16 {
-    .NotifyRecievedInputFrame = 0,
-    .BroadcastInputFrame = 0,
+    .NotifyRecievedInputFrame = 5,
+    .BroadcastInputFrame = 20,
     .BroadcastLobbyStartGame = 500,
     .BroadcastLobbyEntry = 1000,
     .RequestLobbyJoin = 0,
@@ -268,7 +268,7 @@ init :: proc(network: ^Network($T), port: int, singleMachineTesting: bool) -> (s
     }
     network.mask = net.IP4_Address{255, 255, 255, 0}
     network.lobby = {}
-    network.loggingEnabled = false
+    network.loggingEnabled = true
     
     queue.init(&network.inputQueue)
 
@@ -413,6 +413,10 @@ accept_join_lobby :: proc(network: ^Network($I), broadcast: ^RequestLobbyJoin) {
 }
 
 all_inputs_uptodate :: proc(network: ^Network($I)) -> bool {
+    if network.inputQueue.len != 0 {
+        return false
+    }
+
     for i in 0..<network.lobby.clientCount {
         if i == get_client_player_idx(network) {
             continue
@@ -484,6 +488,11 @@ recieve_input_state :: proc(network: ^Network($I), broadcastInputFrame: ^Broadca
 
     currentFrameNumber := network.inputFrameCount
     newFrameNumber := broadcastInputFrame.frameNumber
+
+    if newFrameNumber == currentFrameNumber-1 {
+        log.msg("debug", newFrameNumber, currentFrameNumber)
+        broadcast_recieved_input_state(network, broadcastInputFrame.frameNumber, broadcastInputFrame.endpoint)
+    }
     
     if newFrameNumber != currentFrameNumber {
         return
@@ -500,27 +509,21 @@ recieve_input_state :: proc(network: ^Network($I), broadcastInputFrame: ^Broadca
     broadcast_recieved_input_state(network, broadcastInputFrame.frameNumber, broadcastInputFrame.endpoint)
 }
 
-recieve_input_recieved_broadcast :: proc(network: ^Network($I), broadcast: ^NotifyRecievedInputFrame) -> bool {
+recieve_input_recieved_broadcast :: proc(network: ^Network($I), broadcast: ^NotifyRecievedInputFrame) {
     if network.inputQueue.len == 0 {
-        return true
+        return
     }
 
     firstInput := queue.front_ptr(&network.inputQueue)
+    
+    log.msg("debug", firstInput.frameNumber, broadcast.frameNumber)
 
-    if firstInput.frameNumber < broadcast.frameNumber {
-        log.msg("error", firstInput.frameNumber, broadcast.frameNumber, "invalid frame number")
-        return false
-    }
-
-    if firstInput.frameNumber > broadcast.frameNumber {
-        return true
+    if firstInput.frameNumber != broadcast.frameNumber {
+        return
     }
 
     idx := get_endpoint_player_idx(network, broadcast.endpoint)
-    
     firstInput.sentTo[idx] = true
-    
-    return true
 }
 
 broadcast_input_state :: proc(network: ^Network($I)) -> bool {
@@ -558,6 +561,8 @@ broadcast_input_state :: proc(network: ^Network($I)) -> bool {
         
         broadcast_packet(network, &packet, network.lobby.clients[i].endpoint)
     }
+
+    log.msg("debug", firstInput.frameNumber)
     
     if u8(sentCount) == network.lobby.clientCount-1 {
         queue.pop_front(&network.inputQueue)

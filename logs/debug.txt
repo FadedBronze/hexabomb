@@ -1,2 +1,0 @@
-[2026-02-14 14:55:27.825700900 +0000 UTC](C:/Code/odin/hexabomb/main.odin(1383:9)) ["New Session"]
-[2026-02-14 14:55:27.827089700 +0000 UTC](C:/Code/odin/hexabomb/main.odin(1432:5)) ["single machine testing:", false]

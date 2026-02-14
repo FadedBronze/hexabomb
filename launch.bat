@@ -1,4 +1,4 @@
-odin build . -debug -out:hexabomb.exe
+odin build . -debug -out:hexabomb.exe 
 :: -subsystem:windows
 
 taskkill /IM hexabomb.exe /F

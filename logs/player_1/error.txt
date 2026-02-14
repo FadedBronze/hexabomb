@@ -1,2 +1,0 @@
-[2026-02-14 14:50:59.130203700 +0000 UTC](C:/Code/odin/hexabomb/network/main.odin(255:5)) ["discovery port:", 4001, "port:", 6969, "address:", [127, 0, 0, 1]]
-[2026-02-14 14:53:42.680559200 +0000 UTC](C:/Code/odin/hexabomb/network/main.odin(441:17)) ["Connection_Refused"]

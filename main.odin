@@ -3,13 +3,15 @@ import "core:strconv"
 import rl "vendor:raylib"
 import "core:math"
 import la "core:math/linalg"
-import "core:math/rand"
 import "core:strings"
 import "core:time"
 import "core:os"
+import vl "core:mem/virtual"
+import "core:math/rand"
 
 import "log"
 import net "network"
+import "ui"
 
 CANNONBALL_SPEED :: 4
 MAX_PLAYERS :: 4
@@ -78,12 +80,6 @@ PlayerState :: enum {
     GotoLobby,
 }
 
-UIFrameInfo :: struct {
-    lastInputState: InputState,
-    inputState: InputState,
-    virtual: bool,
-}
-
 Player :: struct {
     tileLimits: [TileType]u8,
     playerState: PlayerState,
@@ -93,7 +89,7 @@ Player :: struct {
     energy: u16,
     username: string,
     activeTileId: u32,
-    using uiFrameInfo: ^UIFrameInfo,
+    using uiFrameInfo: ^ui.FrameInfo,
 }
 
 TileTypeStat :: struct {
@@ -158,7 +154,7 @@ defaultGameStats := GameStats{
 }
 
 Game :: struct {
-    ui: UI,
+    ui: ui.UI,
 
     tileTypeStats: [TileType]TileTypeStat,
     stats: GameStats,
@@ -213,7 +209,7 @@ click_tile :: proc(game: ^Game, currentPlayerIndex: u8) {
         return
     }
 
-    if is_left_button_pressed(player.uiFrameInfo) {
+    if ui.is_left_button_pressed(player.uiFrameInfo) {
         if rl.IsKeyDown(.LEFT_SHIFT) {
             log.msg("debug", hovered_tile)
         }
@@ -238,11 +234,11 @@ render_active_tile :: proc(game: ^Game, currentPlayerIndex: u8) {
     tile, pos := get_active_tile(&game.tileGrid, player)
 
     if tile != nil && tile.type == .Mortar {
-        row_layout(&game.ui, .Down, la.Vector2f32{inputState.screenSize.x - 10 - 150, inputState.screenSize.y / 2 - 52.5}, 5)
+        ui.row_layout(&game.ui, .Down, la.Vector2f32{inputState.screenSize.x - 10 - 150, inputState.screenSize.y / 2 - 52.5}, 5)
 
         buf: [32]u8
 
-        if (button(&game.ui, player.uiFrameInfo, rl.Rectangle {
+        if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle {
             width = 150,
             height = 50,
         }, format_cost_and_scaling(game, .Mortar, buf[:]), player.color) && player.energy >= auto_cast game.tileTypeStats[.Mortar].scalingCost) {
@@ -250,7 +246,7 @@ render_active_tile :: proc(game: ^Game, currentPlayerIndex: u8) {
             player.energy -= auto_cast game.tileTypeStats[.Mortar].scalingCost
         }
 
-        if (button(&game.ui, player.uiFrameInfo, rl.Rectangle {
+        if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle {
             width = 150,
             height = 50,
         }, "fire", player.color)) {
@@ -258,15 +254,15 @@ render_active_tile :: proc(game: ^Game, currentPlayerIndex: u8) {
             player.selectedTileType = .MortarTarget
         }
 
-        row_layout_end(&game.ui)
+        ui.row_layout_end(&game.ui)
     }
 
     if tile != nil && tile.type == .Defense {
-        row_layout(&game.ui, .Down, la.Vector2f32{inputState.screenSize.x - 10 - 150, inputState.screenSize.y / 2 - 52.5}, 5)
+        ui.row_layout(&game.ui, .Down, la.Vector2f32{inputState.screenSize.x - 10 - 150, inputState.screenSize.y / 2 - 52.5}, 5)
 
         buf: [32]u8
 
-        if (button(&game.ui, player.uiFrameInfo, rl.Rectangle {
+        if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle {
             width = 150,
             height = 50,
         }, format_cost_and_scaling(game, .Defense, buf[:]), player.color) && player.energy >= auto_cast game.tileTypeStats[.Defense].scalingCost) {
@@ -274,20 +270,20 @@ render_active_tile :: proc(game: ^Game, currentPlayerIndex: u8) {
             player.energy -= auto_cast game.tileTypeStats[.Defense].scalingCost
         }
 
-        row_layout_end(&game.ui)
+        ui.row_layout_end(&game.ui)
     }
 
     if tile != nil && tile.type == .Shield {
-        row_layout(&game.ui, .Down, la.Vector2f32{inputState.screenSize.x - 10 - 150, inputState.screenSize.y / 2 - 52.5}, 5)
+        ui.row_layout(&game.ui, .Down, la.Vector2f32{inputState.screenSize.x - 10 - 150, inputState.screenSize.y / 2 - 52.5}, 5)
 
-        if (button(&game.ui, player.uiFrameInfo, rl.Rectangle {
+        if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle {
             width = 150,
             height = 50,
         }, "rotate", player.color)) {
             tile.direction = HexDirection((u8(tile.direction)+1)%6)
         }
 
-        row_layout_end(&game.ui)
+        ui.row_layout_end(&game.ui)
     }
 }
 
@@ -366,7 +362,7 @@ next_to_own_territory :: proc(game: ^Game, currentPlayerIndex: u8, halfGridPos: 
 place_tile :: proc(game: ^Game, currentPlayerIndex: u8) {
     player := &game.players[currentPlayerIndex]
 
-    if !is_left_button_pressed(player.uiFrameInfo) {
+    if !ui.is_left_button_pressed(player.uiFrameInfo) {
         return
     }
 
@@ -574,13 +570,12 @@ assign_tile_limits :: proc(game: ^Game) {
 }
 
 ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
-    ui := &game.ui
     // ui buttonstrip
-    row_layout(ui, .Right, {10, 10}, 10)
+    ui.row_layout(&game.ui, .Right, {10, 10}, 10)
 
     player := &game.players[currentPlayerIndex]
 
-    if (button(ui, player.uiFrameInfo, rl.Rectangle {
+    if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle {
         width = 80,
         height = 75,
     }, "cannon", player.color)) {
@@ -588,7 +583,7 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
         player.editMode = .Placing
     }
 
-    if (button(ui, player.uiFrameInfo, rl.Rectangle {
+    if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle {
         width = 80,
         height = 75,
     }, "land", player.color)) {
@@ -596,7 +591,7 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
         player.editMode = .Placing
     }
 
-    if (button(ui, player.uiFrameInfo, rl.Rectangle {
+    if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle {
         width = 80,
         height = 75,
     }, "defense", player.color)) {
@@ -604,7 +599,7 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
         player.editMode = .Placing
     }
 
-    if (button(ui, player.uiFrameInfo, rl.Rectangle {
+    if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle {
         width = 80,
         height = 75,
     }, "shield", player.color)) {
@@ -613,7 +608,7 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
     }
 
     //if player.nukes != 0 {
-    if (button(ui, player.uiFrameInfo, rl.Rectangle {
+    if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle {
         width = 80,
         height = 75,
     }, "nuke", player.color)) {
@@ -622,7 +617,7 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
     }
     //}
 
-    if (button(ui, player.uiFrameInfo, rl.Rectangle {
+    if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle {
         width = 80,
         height = 75,
     }, "mortar", player.color)) {
@@ -630,7 +625,7 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
         player.editMode = .Placing
     }
 
-    if (button(ui, player.uiFrameInfo, rl.Rectangle {
+    if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle {
         width = 80,
         height = 75,
     }, "lookout", player.color)) {
@@ -638,7 +633,7 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
         player.editMode = .Placing
     }
 
-    if (button(ui, player.uiFrameInfo, rl.Rectangle {
+    if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle {
         width = 80,
         height = 75,
     }, "bridge", player.color)) {
@@ -646,7 +641,7 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
         player.editMode = .Placing
     }
 
-    if (button(ui, player.uiFrameInfo, rl.Rectangle {
+    if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle {
         width = 80,
         height = 75,
     }, "landmine", player.color)) {
@@ -654,25 +649,25 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
         player.editMode = .Placing
     }
 
-    if (button(ui, player.uiFrameInfo, rl.Rectangle {
+    if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle {
         width = 80,
         height = 75,
     }, "click", player.color)) {
         player.editMode = .Clicking
     }
 
-    row_layout_end(ui)
+    ui.row_layout_end(&game.ui)
 
-    row_layout(ui, .Left, {f32(player.inputState.screenSize.x-10), f32(player.inputState.screenSize.y-10) - 75}, 10)
+    ui.row_layout(&game.ui, .Left, {f32(player.inputState.screenSize.x-10), f32(player.inputState.screenSize.y-10) - 75}, 10)
 
-    if (button(ui, player.uiFrameInfo, rl.Rectangle {
+    if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle {
         width = 150,
         height = 75,
     }, "end turn", player.color)) {
         start_next_turn(game, currentPlayerIndex)
     }
 
-    if (button(ui, player.uiFrameInfo, rl.Rectangle {
+    if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle {
         width = 150,
         height = 75,
     }, "lobby", player.color)) {
@@ -690,20 +685,20 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
         }
     }
 
-    row_layout_end(ui)
+    ui.row_layout_end(&game.ui)
 
-    row_layout(ui, .Right, la.Vector2f32 { 10, player.inputState.screenSize.y - 30 }, 10)
+    ui.row_layout(&game.ui, .Right, la.Vector2f32 { 10, player.inputState.screenSize.y - 30 }, 10)
 
     {
         buf: [8]u8
-        text_display(ui, player.uiFrameInfo, { width = 20, height = 20 }, strconv.write_int(buf[:], i64(game.rounds), 10), rl.BLACK)
+        ui.text_display(&game.ui, player.uiFrameInfo, { width = 20, height = 20 }, strconv.write_int(buf[:], i64(game.rounds), 10), rl.BLACK)
     }
 
     {
         buf: [8]u8
         str := strconv.write_int(buf[:], i64(player.energy), 10)
         buf[len(str)] = 'e'
-        text_display(ui, player.uiFrameInfo, { width = 40, height = 20 }, cast(string)buf[:], rl.BLACK)
+        ui.text_display(&game.ui, player.uiFrameInfo, { width = 40, height = 20 }, cast(string)buf[:], rl.BLACK)
     }
 
     cost := game.tileTypeStats[player.selectedTileType].cost
@@ -712,7 +707,7 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
         buf[0] = '-'
         str := strconv.write_int(buf[1:], i64(cost), 10)
         buf[len(str)+1] = 'e'
-        text_display(ui, player.uiFrameInfo, { width = 40, height = 20 }, cast(string)buf[:], rl.RED)
+        ui.text_display(&game.ui, player.uiFrameInfo, { width = 40, height = 20 }, cast(string)buf[:], rl.RED)
     }
 
     {
@@ -727,12 +722,12 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
         }
 
         copy(buf[len(str):], "")
-        text_display(ui, player.uiFrameInfo, { width = 40, height = 20 }, cast(string)buf[:len(str)+5], rl.BLACK)
+        ui.text_display(&game.ui, player.uiFrameInfo, { width = 40, height = 20 }, cast(string)buf[:len(str)+5], rl.BLACK)
     }
 
-    text_display(ui, player.uiFrameInfo, rl.Rectangle { width = 20, height = 20 }, player.username, player.color)
+    ui.text_display(&game.ui, player.uiFrameInfo, rl.Rectangle { width = 20, height = 20 }, player.username, player.color)
 
-    row_layout_end(ui)
+    ui.row_layout_end(&game.ui)
 }
 
 apply_friction :: proc(v: ^la.Vector2f32, f: f32) {
@@ -1044,7 +1039,7 @@ create_player_land :: proc(game: ^Game, id: u8, haldGridPos: HalfGridPosition) {
 game_selector :: proc(game: ^Game, player: ^Player) {
     hexagonSize: i32 = 30
 
-    if (button(&game.ui, player.uiFrameInfo, rl.Rectangle{
+    if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle{
         x = player.inputState.screenSize.x/2 - 75,
         y = player.inputState.screenSize.y/2 - 75,
         width = 150,
@@ -1068,7 +1063,7 @@ game_selector :: proc(game: ^Game, player: ^Player) {
     }
 
     if game.playerCount == 1 {
-        if (button(&game.ui, player.uiFrameInfo, rl.Rectangle{
+        if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle{
             x = player.inputState.screenSize.x/2 - 75,
             y = player.inputState.screenSize.y/2 + 75,
             width = 150,
@@ -1099,7 +1094,7 @@ game_selector :: proc(game: ^Game, player: ^Player) {
         }
     }
 
-    if (button(&game.ui, player.uiFrameInfo, rl.Rectangle{
+    if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle{
         x = player.inputState.screenSize.x/2 + 75,
         y = player.inputState.screenSize.y/2 + 75,
         width = 150,
@@ -1123,7 +1118,7 @@ game_selector :: proc(game: ^Game, player: ^Player) {
         assign_tile_limits(game)
     }
 
-    if (button(&game.ui, player.uiFrameInfo, rl.Rectangle{
+    if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle{
         x = player.inputState.screenSize.x/2 - 225,
         y = player.inputState.screenSize.y/2 + 75,
         width = 150,
@@ -1148,7 +1143,7 @@ game_selector :: proc(game: ^Game, player: ^Player) {
         assign_tile_limits(game)
     }
 
-    if (button(&game.ui, player.uiFrameInfo, rl.Rectangle{
+    if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle{
         x = player.inputState.screenSize.x/2 + 75,
         y = player.inputState.screenSize.y/2 - 75,
         width = 150,
@@ -1172,7 +1167,7 @@ game_selector :: proc(game: ^Game, player: ^Player) {
         assign_tile_limits(game)
     }
 
-    if (button(&game.ui, player.uiFrameInfo, rl.Rectangle{
+    if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle{
         x = player.inputState.screenSize.x/2 - 225,
         y = player.inputState.screenSize.y/2 - 75,
         width = 150,
@@ -1195,7 +1190,7 @@ game_selector :: proc(game: ^Game, player: ^Player) {
         assign_tile_limits(game)
     }
 
-    if (button(&game.ui, player.uiFrameInfo, rl.Rectangle{
+    if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle{
         x = player.inputState.screenSize.x/2 - 225,
         y = player.inputState.screenSize.y/2 - 125,
         width = 50,
@@ -1223,7 +1218,7 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
     case .GameSelector:
         game_selector(game, player)
     case .Winner:
-        within_button := within_button(&game.ui, player.uiFrameInfo, rl.Rectangle{
+        within_button := ui.within_button(&game.ui, player.uiFrameInfo, rl.Rectangle{
             x = player.inputState.screenSize.x/2 - 100,
             y = player.inputState.screenSize.y/2 - 0,
             width = 100,
@@ -1238,14 +1233,14 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
             }
 
             if game.winnerIdx == currentPlayerIndex {
-                text_display(&game.ui, player.uiFrameInfo, rl.Rectangle{
+                ui.text_display(&game.ui, player.uiFrameInfo, rl.Rectangle{
                     x = player.inputState.screenSize.x/2 - 75,
                     y = player.inputState.screenSize.y/2 - 120,
                     width = 150,
                     height = 150,
                 }, "Victory", rl.WHITE, 50)
             } else {
-                text_display(&game.ui, player.uiFrameInfo, rl.Rectangle{
+                ui.text_display(&game.ui, player.uiFrameInfo, rl.Rectangle{
                     x = player.inputState.screenSize.x/2 - 75,
                     y = player.inputState.screenSize.y/2 - 120,
                     width = 150,
@@ -1253,7 +1248,7 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
                 }, "Defeat", rl.WHITE, 50)
             }
 
-            if (button(&game.ui, player.uiFrameInfo, rl.Rectangle{
+            if (ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle{
                 x = player.inputState.screenSize.x/2 - 0,
                 y = player.inputState.screenSize.y/2 - 0,
                 width = 100,
@@ -1263,7 +1258,7 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
             }
         }
         case .Paused:
-            play := button(&game.ui, player.uiFrameInfo, rl.Rectangle{
+            play := ui.button(&game.ui, player.uiFrameInfo, rl.Rectangle{
                 x = player.inputState.screenSize.x/2 - 75,
                 y = player.inputState.screenSize.y/2 - 75,
                 width = 150,
@@ -1299,55 +1294,23 @@ AppState :: enum {
     Playing,
 }
 
-MouseState :: enum {
-    Up,
-    Down,
-}
-
-InputState :: struct {
-    mousePos: la.Vector2f32,
-    screenSize: la.Vector2f32,
-    leftButton: MouseState,
-}
-
 App :: struct {
     state: AppState,
-    ui: UI,
     
     fuzzInputTest: bool,
 
     gameStartTime: time.Time,
-    currentClientInputState: InputState,    
-    lastClientInputState: InputState,    
+    currentClientInputState: ui.InputState,    
+    lastClientInputState: ui.InputState,    
 
-    network: net.Network(InputState),
+    network: net.Network(ui.InputState),
     gameInstance: Game,
 
     playerNames: [MAX_PLAYERS]string,
     playerCount: u8,
     playerIndex: u8,
-}
-
-get_button_state :: proc() -> MouseState {
-    if rl.IsMouseButtonDown(.LEFT) {
-        return .Down
-    }
-
-    if rl.IsMouseButtonUp(.LEFT) {
-        return .Up
-    }
-
-    unreachable()
-}
-
-get_input_state :: proc() -> InputState {
-    screenSize := la.Vector2f32{f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())}
-
-    return InputState {
-        mousePos = rl.GetMousePosition(),
-        leftButton = get_button_state(),
-        screenSize = screenSize,
-    }
+    
+    ui: ui.UI,
 }
 
 init_game :: proc(app: ^App) {
@@ -1439,46 +1402,32 @@ init_app :: proc(app: ^App, cliArgs: ^CLIArgs) {
     net.incrementFrameNumber(&app.network, &app.currentClientInputState)
 }
 
-generate_random_input :: proc(screenSize: [2]f32) -> InputState {
-    return InputState {
-        mousePos = {
-            screenSize.x * rand.float32(),
-            screenSize.y * rand.float32(),
-        },
-        screenSize = screenSize,
-        leftButton = MouseState(rand.float32() * f32(max(MouseState))+1)
-    }
-}
-
 update_app :: proc(app: ^App, dt: f32) {
-    //buf: [1024 * 10]u8
-    //tempBuf: [1024 * 10]u8
-
-    //frameArena: vl.Arena
-    //tempFrameArena: vl.Arena
-    //
-    //if err := vl.arena_init_buffer(&frameArena, buf[:]); err != nil {
-    //    fmt.println(err)
-    //    assert(false)
-    //}
-    //
-    //if err := vl.arena_init_buffer(&tempFrameArena, tempBuf[:]); err != nil {
-    //    fmt.println(err)
-    //    assert(false)
-    //}
-
-    //allocator_arena := vl.arena_allocator(&frameArena)
-    //temp_allocator_arena := vl.arena_allocator(&tempFrameArena)
-    //
-    //context.allocator = allocator_arena
-    //context.temp_allocator = temp_allocator_arena
+    frameArena: vl.Arena
+    tempFrameArena: vl.Arena
     
-    app.currentClientInputState = get_input_state()
+    if err := vl.arena_init_growing(&frameArena); err != nil {
+        log.msg("error", err)
+        assert(false)
+    }
+    
+    if err := vl.arena_init_growing(&tempFrameArena); err != nil {
+        log.msg("error", err)
+        assert(false)
+    }
+
+    defer vl.arena_destroy(&frameArena)
+    defer vl.arena_destroy(&tempFrameArena)
+    
+    context.allocator = vl.arena_allocator(&frameArena)
+    context.temp_allocator = vl.arena_allocator(&tempFrameArena)
+    
+    app.currentClientInputState = ui.get_input_state()
 
     app.fuzzInputTest = rl.IsKeyPressed(.T) ? !app.fuzzInputTest : app.fuzzInputTest
 
     if app.fuzzInputTest {
-        app.currentClientInputState = generate_random_input({920, 800})
+        app.currentClientInputState = ui.generate_random_input({920, 800})
     }
 
     switch app.state {
@@ -1492,10 +1441,10 @@ update_app :: proc(app: ^App, dt: f32) {
             app.network.state = .Failed
             app.state = .Connecting
         } 
-
+        
         if !net.all_inputs_uptodate(&app.network) {
-            break;
-        }
+            break
+        }        
 
         rl.BeginDrawing()
         rl.ClearBackground(rl.WHITE)
@@ -1508,13 +1457,13 @@ update_app :: proc(app: ^App, dt: f32) {
             player := &app.gameInstance.players[i]
 
             if i != app.playerIndex {
-                player.uiFrameInfo = &UIFrameInfo {
+                player.uiFrameInfo = &ui.FrameInfo {
                     inputState = app.network.inputFrames[i],
                     lastInputState = app.network.prevInputFrames[i],
                     virtual = true,
                 }
             } else {
-                player.uiFrameInfo = &UIFrameInfo {
+                player.uiFrameInfo = &ui.FrameInfo {
                     inputState = app.network.currentInputFrameState,
                     lastInputState = app.network.lastInputFrameState,
                     virtual = false,
@@ -1523,7 +1472,7 @@ update_app :: proc(app: ^App, dt: f32) {
             
             update_game(&app.gameInstance, dt, u8(i)) 
         }
-        
+
         net.incrementFrameNumber(&app.network, &app.currentClientInputState)
 
         rl.EndDrawing()
@@ -1531,7 +1480,7 @@ update_app :: proc(app: ^App, dt: f32) {
         rl.BeginDrawing()
         rl.ClearBackground(rl.WHITE)
 
-        update_network_interface(app, &UIFrameInfo{
+        update_network_interface(app, &ui.FrameInfo{
             inputState = app.currentClientInputState,
             lastInputState = app.lastClientInputState,
             virtual = false,
@@ -1548,39 +1497,13 @@ update_app :: proc(app: ^App, dt: f32) {
     app.lastClientInputState = app.currentClientInputState
 }
 
-is_left_button_pressed :: proc(uiFrameInfo: ^UIFrameInfo) -> bool {
-    return uiFrameInfo.inputState.leftButton == .Down && uiFrameInfo.lastInputState.leftButton == .Up
-}
-
-main :: proc() {
-    cliArgs := parse_cli_args()
-
-    rl.InitWindow(920, 800, "hexabomb")
-    rl.SetWindowState({.WINDOW_RESIZABLE})
-
-    if cliArgs.username == "player_1" {
-        rl.SetWindowPosition(30, 40)
-    }
-
-    if cliArgs.username == "player_2" {
-        rl.SetWindowPosition(970, 40)
-    }
-
-    app: App
-    init_app(&app, &cliArgs)
-
-    for !rl.WindowShouldClose() {
-        update_app(&app, rl.GetFrameTime())
-    }
-}
-
-update_network_interface :: proc(app: ^App, uiFrameInfo: ^UIFrameInfo) { 
+update_network_interface :: proc(app: ^App, uiFrameInfo: ^ui.FrameInfo) { 
     inputState := uiFrameInfo.inputState
     network := &app.network
 
     switch network.state {
     case .Failed:
-        try_again := button(&app.ui, uiFrameInfo, rl.Rectangle{
+        try_again := ui.button(&app.ui, uiFrameInfo, rl.Rectangle{
             x = f32(rl.GetScreenWidth())/2 - 75,
             y = f32(rl.GetScreenHeight())/2 - 75,
             width = 150,
@@ -1623,7 +1546,7 @@ update_network_interface :: proc(app: ^App, uiFrameInfo: ^UIFrameInfo) {
 
             net.recieve_discovery_messages(network)
 
-            start := button(&app.ui, uiFrameInfo, rl.Rectangle{
+            start := ui.button(&app.ui, uiFrameInfo, rl.Rectangle{
                 x = f32(rl.GetScreenWidth())/2 - 75,
                 y = f32(rl.GetScreenHeight())/2 - 75,
                 width = 150,
@@ -1648,14 +1571,14 @@ update_network_interface :: proc(app: ^App, uiFrameInfo: ^UIFrameInfo) {
             0, 0, 0, 150
         })
 
-        row_layout(&app.ui, .Up, la.Vector2f32{
+        ui.row_layout(&app.ui, .Up, la.Vector2f32{
             f32(rl.GetScreenWidth())/2 - 75,
             f32(rl.GetScreenHeight())/2 - 75,
         }, 10)
 
         lobby_count := network.lobbyEntries.len
 
-        if button(&app.ui, uiFrameInfo, rl.Rectangle{
+        if ui.button(&app.ui, uiFrameInfo, rl.Rectangle{
             width = 150,
             height = 50,
         }, lobby_count > 0 ? net.fmt_lobby_name(&network.lobbyEntries.data[0]) : "--", rl.GRAY) && lobby_count > 0 {
@@ -1666,7 +1589,7 @@ update_network_interface :: proc(app: ^App, uiFrameInfo: ^UIFrameInfo) {
             network.state = .WaitingForLobbyInfo
         }
 
-        if button(&app.ui, uiFrameInfo, rl.Rectangle{
+        if ui.button(&app.ui, uiFrameInfo, rl.Rectangle{
             width = 150,
             height = 50,
         }, lobby_count > 1 ? net.fmt_lobby_name(&network.lobbyEntries.data[1]) : "--", rl.GRAY) && lobby_count > 1 {
@@ -1677,7 +1600,7 @@ update_network_interface :: proc(app: ^App, uiFrameInfo: ^UIFrameInfo) {
             network.state = .WaitingForLobbyInfo
         }
 
-        if button(&app.ui, uiFrameInfo, rl.Rectangle{
+        if ui.button(&app.ui, uiFrameInfo, rl.Rectangle{
             width = 150,
             height = 50,
         }, lobby_count > 2 ? net.fmt_lobby_name(&network.lobbyEntries.data[2]) : "--", rl.GRAY) && lobby_count > 2 {
@@ -1688,7 +1611,7 @@ update_network_interface :: proc(app: ^App, uiFrameInfo: ^UIFrameInfo) {
             network.state = .WaitingForLobbyInfo
         }
 
-        if button(&app.ui, uiFrameInfo, rl.Rectangle{
+        if ui.button(&app.ui, uiFrameInfo, rl.Rectangle{
             width = 150,
             height = 50,
         }, lobby_count > 3 ? net.fmt_lobby_name(&network.lobbyEntries.data[3]) : "--", rl.GRAY) && lobby_count > 3 {
@@ -1699,16 +1622,38 @@ update_network_interface :: proc(app: ^App, uiFrameInfo: ^UIFrameInfo) {
             network.state = .WaitingForLobbyInfo
         }
 
-        create_room := button(&app.ui, uiFrameInfo, rl.Rectangle{
+        create_room := ui.button(&app.ui, uiFrameInfo, rl.Rectangle{
             width = 150,
             height = 50,
         }, "create room", rl.GRAY)
 
-        row_layout_end(&app.ui)
+        ui.row_layout_end(&app.ui)
 
         if (create_room) {
             net.create_lobby(network, "the room")
             network.state = .InLobby
         }
     }    
+}
+
+main :: proc() {
+    cliArgs := parse_cli_args()
+
+    rl.InitWindow(920, 800, "hexabomb")
+    rl.SetWindowState({.WINDOW_RESIZABLE})
+
+    if cliArgs.username == "player_1" {
+        rl.SetWindowPosition(30, 40)
+    }
+
+    if cliArgs.username == "player_2" {
+        rl.SetWindowPosition(970, 40)
+    }
+
+    app: App
+    init_app(&app, &cliArgs)
+
+    for !rl.WindowShouldClose() {
+        update_app(&app, rl.GetFrameTime())
+    }
 }

@@ -14,11 +14,12 @@ FileLogger :: struct {
 _logger: FileLogger
 
 init :: proc(directory: string) {
-    buf: [32]u8
-    sb := strings.builder_from_slice(buf[:])
-    path := fmt.sbprintf(&sb, "./logs/", directory, "/")
+    err := os.make_directory(strings.concatenate({"./logs/", directory, "/"}), os.O_CREATE)
 
-    os.make_directory(path)
+    if err != nil && err != .Exist {
+        fmt.println(err)
+        assert(false)
+    }
 
     _logger.directory = directory
     _logger.handles = make(map[string]os.Handle)

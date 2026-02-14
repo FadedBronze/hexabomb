@@ -1,2 +1,0 @@
-[2026-02-14 14:55:27.826205200 +0000 UTC](C:/Code/odin/hexabomb/main.odin(1384:9)) ["New Session"]
-[2026-02-14 14:55:27.836404600 +0000 UTC](C:/Code/odin/hexabomb/network/main.odin(255:5)) ["discovery port:", 4000, "port:", 6969, "address:", [192, 168, 2, 12]]

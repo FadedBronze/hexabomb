@@ -2,6 +2,7 @@ package main
 import "core:math"
 import rl "vendor:raylib"
 import la "core:math/linalg"
+import "ui"
 
 MAX_GRID_SIZE :: 32 
 HALF_MAX_GRID_SIZE :: MAX_GRID_SIZE / 2
@@ -179,7 +180,7 @@ get_tile :: proc(tileGrid: ^TileGrid, pos: HalfGridPosition) -> ^Tile {
     return &tileGrid.tiles[idx]
 }
 
-update_tilegrid_offset :: proc(tileGrid: ^TileGrid, inputState: ^InputState) { 
+update_tilegrid_offset :: proc(tileGrid: ^TileGrid, inputState: ^ui.InputState) { 
     half_length := i32(f32(tileGrid.hexagonSize) * math.sqrt_f32(3) / 3)
     tileGrid.offset = {i32(inputState.screenSize.x) / 2 - half_length, i32(inputState.screenSize.y) / 2 - tileGrid.hexagonSize}
 }
@@ -200,16 +201,16 @@ get_active_tile :: proc(tilegrid: ^TileGrid, player: ^Player) -> (^Tile, HalfGri
     return &tilegrid.tiles[idx], HalfGridPosition{i16(x)-HALF_MAX_GRID_SIZE, i16(y)-HALF_MAX_GRID_SIZE}
 }
 
-hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player, ui: ^UI, id := #caller_location) {
-    if ui.activeId == empty_id() {
-        ui.activeId = id
+hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player, game_ui: ^ui.UI, id := #caller_location) {
+    if game_ui.activeId == ui.empty_id() {
+        game_ui.activeId = id
     }
 
     if player.virtual {
         return
     }
 
-    if ui.activeId != id {
+    if game_ui.activeId != id {
         return
     }
 
