@@ -43,6 +43,8 @@ ParticleBase :: struct {
     },
     speed: f32,
     inheritVelocity: f32,
+    sfxPlayTime: f32,
+    sfxName: string,
 }
 
 Particle :: struct {
@@ -52,6 +54,7 @@ Particle :: struct {
     velocity: la.Vector2f32,
     timeLeftSeconds: f32,
     timeTillSummon: f32,
+    timeTillSfx: f32,
 }
 
 explosion_mini := ParticleBase{
@@ -106,7 +109,9 @@ explosion := ParticleBase {
     friction = 0,
     summonQuantity = 6,
     summon = &explosion_middle,
-    summonFrequency = 1 / 0.13
+    summonFrequency = 1 / 0.13,
+    sfxName = "explosion.mp3",
+    sfxPlayTime = 0.1,
 }
 
 trail_particle := ParticleBase {
@@ -199,6 +204,13 @@ simulate_particles :: proc(game: ^Game, dt: f32) -> (completed_particles: bool) 
         }
 
         elapsed := particle.initialTimeSeconds - particle.timeLeftSeconds
+
+        particle.timeTillSfx -= dt
+
+        if particle.sfxPlayTime != 0 && particle.timeTillSfx < 0 {
+            particle.timeTillSfx = particle.sfxPlayTime
+            play_audio(particle.sfxName)
+        }
 
         if following {
             particle.position = followingEntity.position
@@ -309,6 +321,7 @@ simulate_entities :: proc(game: ^Game, dt: f32) {
 
             if !within_halfgrid_range(game.tileGrid.size, halfgridPos) {
                 complete_entity(game, entity)
+                add_particle(game, &explosion, opts={position=entity.position})
             }
         }
     }
@@ -341,7 +354,7 @@ damage_tile :: proc(game: ^Game, halfGridPos: HalfGridPosition, amount: u8) {
     tile := get_tile(&game.tileGrid, halfGridPos)
 
     if tile.type == .Landmine {
-        add_particle(game, &explosion, opts={halfgridPos=halfGridPos})
+        add_particle(game, &explosion, opts={position=halfGridPos})
 
         for direction in directions {
             for i in 1..<3 {
@@ -391,7 +404,10 @@ append_entityId :: proc(tile: ^Tile, entityId: u32) {
 }
 
 AddParticleOpts :: struct {
-    halfgridPos: HalfGridPosition, 
+    position: union {
+        HalfGridPosition,
+        la.Vector2f32
+    }
 }
 
 create_particle :: proc(base: ^ParticleBase) -> (p: Particle) {
@@ -409,7 +425,12 @@ create_particle :: proc(base: ^ParticleBase) -> (p: Particle) {
 add_particle :: proc(game: ^Game, base: ^ParticleBase, opts := AddParticleOpts{}) -> ^Particle {
     particle := create_particle(base)
     
-    particle.position = get_screen_position(&game.tileGrid, opts.halfgridPos)
+    switch v in opts.position {
+        case HalfGridPosition:
+            particle.position = get_screen_position(&game.tileGrid, v)
+        case la.Vector2f32:
+            particle.position = v
+    }
 
     if sm.push(&game.particles, particle) {
         return &game.particles.data[game.particles.len-1]
@@ -448,6 +469,6 @@ add_cannonball :: proc(game: ^Game, cannonPos: HalfGridPosition, halfgridPos: Ha
         damage = game.tileTypeStats[.BlastTarget].damage
     }, EntityType.Shot)
 
-    p := add_particle(game, &trail_emitter, opts={halfgridPos=halfgridPos})
+    p := add_particle(game, &trail_emitter, opts={position=halfgridPos})
     p.followEntityId = id
 }

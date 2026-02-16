@@ -548,6 +548,7 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
             width = 80,
             height = 75,
         }, button_names[tile], player.color, id=button_names[tile])) {
+            //IDK yet play_audio("click.mp3")
             player.editMode = .Placing
             player.selectedTileType = tile
         }
@@ -1075,6 +1076,7 @@ App :: struct {
     playerIndex: u8,
     
     ui: ui.UI,
+    audio: Audio,
 }
 
 init_game :: proc(app: ^App) {
@@ -1162,6 +1164,12 @@ init_app :: proc(app: ^App, cliArgs: ^CLIArgs) {
         app.state = .Playing
         net.create_local_lobby(&app.network, "my lobby")
     }    
+
+    ui.init(&app.ui)
+    rl.InitAudioDevice()
+    init_audio("./sfx/", &app.audio)
+
+    play_audio("music.mp3")
     
     net.incrementFrameNumber(&app.network, &app.currentClientInputState)
 }
@@ -1396,5 +1404,6 @@ main :: proc() {
     
     for !rl.WindowShouldClose() {
         update_app(&app, rl.GetFrameTime())
+        update_audio()
     }
 }

@@ -10,10 +10,7 @@ import "../utils"
 BUTTON_FONT_SIZE :: 22
 
 @(private="file")
-ui_buffer: UI
-
-@(private="file")
-default_ui: ^UI = &ui_buffer
+default_ui: ^UI
 
 Uniquifier :: union {
     u64,
@@ -74,6 +71,11 @@ RowLayout :: struct {
     y_offset: f32,
     gap: f32,
     bounds: [2]f32,
+}
+
+init :: proc(ui_ptr: ^UI) {
+    assert(ui_ptr != nil)
+    default_ui = ui_ptr
 }
 
 row_layout :: proc(direction: RowDirection, offset: la.Vector2f32, gap: f32, ui := default_ui) {

@@ -256,6 +256,10 @@ hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player, loc := #caller_loca
         case .Defense:
             fill_hexagon(i32(spos.x), i32(spos.y), 20, rl.Color{200, 200, 200, 255})
         }
+        
+        if player.selectedTileType != .Land {
+            outline_hexagon_halfgrid(halfgrid, tileGrid.offset, rl.SKYBLUE, tileGrid.hexagonSize)
+        }
     } else {
         outline_hexagon_halfgrid(halfgrid, tileGrid.offset, rl.RED, tileGrid.hexagonSize)
     }
