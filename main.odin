@@ -157,14 +157,16 @@ playerColors := [4]rl.Color {
     rl.ORANGE,
 }
 
-format_cost_and_scaling :: proc(game: ^Game, tileType: TileType, buf: []u8) -> string {
+format_cost_and_scaling :: proc(game: ^Game, tileType: TileType, bufstr: []u8) -> string {
+    assert(len(bufstr)>=16)
+
     scalingCost := game.tileTypeStats[tileType].scalingCost
     scaling := game.tileTypeStats[tileType].scaling
     buf: [4]u8
     buf2: [4]u8
-    bufstr: [16]u8
 
     return utils.concatenate(bufstr[:], 
+        "+",
         strconv.write_uint(buf[:], u64(scaling), 10), 
         " for ", 
         strconv.write_uint(buf2[:], u64(scalingCost), 10), 
@@ -205,7 +207,7 @@ click_tile :: proc(game: ^Game, currentPlayerIndex: u8) {
     }
 }
 
-render_active_tile :: proc(game: ^Game, currentPlayerIndex: u8) {
+active_tile_ui :: proc(game: ^Game, currentPlayerIndex: u8) {
     player := &game.players[currentPlayerIndex]
     inputState := player.inputState
 
@@ -361,7 +363,7 @@ place_tile :: proc(game: ^Game, currentPlayerIndex: u8) {
                 damage = game.tileTypeStats[.BlastTarget].cost
             }, EntityType.Nuke)
             
-            add_particle(game, halfgridPos, particle_preset(.Explosion))
+            add_particle(game, &explosion, opts={halfgridPos})
         }
     case .MortarTarget:
         if pay_active_tile_cost(game, player) {
@@ -369,7 +371,7 @@ place_tile :: proc(game: ^Game, currentPlayerIndex: u8) {
                 damage = activeTile.damage
             }, EntityType.MortarShot)
 
-            add_particle(game, halfgridPos, particle_preset(.Explosion))
+            add_particle(game, &explosion, opts={halfgridPos})
 
             player.activeTileId = 0
             player.editMode = .Clicking
@@ -964,9 +966,11 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
     player := &game.players[currentPlayerIndex]
 
     if game.state != .GameSelector {
-        update_tilegrid_offset(&game.tileGrid, &player.inputState)
+        if .Update in player.behaviour {
+            update_tilegrid_offset(&game.tileGrid, &player.inputState)
+        }
 
-        if !player.virtual {
+        if .Draw in player.behaviour {
             render_gameboard(game, currentPlayerIndex)
         }
     }
@@ -983,7 +987,7 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
         }, "peek", player.color)
 
         if (!within_button || player.inputState.leftButton == .Up) {
-            if !player.virtual {
+            if .Draw in player.behaviour {
                 rl.DrawRectangle(0, 0, auto_cast player.inputState.screenSize.x, auto_cast player.inputState.screenSize.y, rl.Color{
                     0, 0, 0, 150
                 })
@@ -1034,14 +1038,17 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
 
         switch player.editMode {
         case .Placing:
-            place_tile(game, currentPlayerIndex)
+            if .Update in player.behaviour {
+                place_tile(game, currentPlayerIndex)
+            }
         case .Clicking:
-            click_tile(game, currentPlayerIndex)
-            render_active_tile(game, currentPlayerIndex)
+            if .Update in player.behaviour {
+                click_tile(game, currentPlayerIndex)
+            }
+            active_tile_ui(game, currentPlayerIndex)
         }
 
         ui_layout(game, currentPlayerIndex)
-
         hover_tilegrid(&game.tileGrid, player)
     }
 }
@@ -1191,9 +1198,7 @@ update_app :: proc(app: ^App, dt: f32) {
             app.state = .Connecting
         } 
         
-        if !net.all_inputs_uptodate(&app.network) {
-            break
-        }        
+        uptodate := net.all_inputs_uptodate(&app.network)
 
         rl.BeginDrawing()
         rl.ClearBackground(rl.WHITE)
@@ -1209,20 +1214,26 @@ update_app :: proc(app: ^App, dt: f32) {
                 player.uiFrameInfo = &ui.FrameInfo {
                     inputState = app.network.inputFrames[i],
                     lastInputState = app.network.prevInputFrames[i],
-                    virtual = true,
+                    behaviour = { }
                 }
             } else {
                 player.uiFrameInfo = &ui.FrameInfo {
                     inputState = app.network.currentInputFrameState,
                     lastInputState = app.network.lastInputFrameState,
-                    virtual = false,
+                    behaviour = { .Draw }
                 }    
+            }
+
+            if uptodate {
+                player.uiFrameInfo.behaviour += { .Update }
             }
             
             update_game(&app.gameInstance, dt, u8(i)) 
         }
 
-        net.incrementFrameNumber(&app.network, &app.currentClientInputState)
+        if uptodate {
+            net.incrementFrameNumber(&app.network, &app.currentClientInputState)
+        }
 
         rl.EndDrawing()
     case .Connecting:
@@ -1232,7 +1243,7 @@ update_app :: proc(app: ^App, dt: f32) {
         update_network_interface(app, &ui.FrameInfo{
             inputState = app.currentClientInputState,
             lastInputState = app.lastClientInputState,
-            virtual = false,
+            behaviour = { .Draw, .Update }
         })    
         
         rl.EndDrawing()
@@ -1328,10 +1339,11 @@ update_network_interface :: proc(app: ^App, uiFrameInfo: ^ui.FrameInfo) {
         lobby_count := network.lobbyEntries.len
 
         for i in 0..<u64(4) {
+            buf: [32]u8
             if ui.button(uiFrameInfo, rl.Rectangle{
                 width = 150,
                 height = 50,
-            }, lobby_count > int(i) ? net.fmt_lobby_name(&network.lobbyEntries.data[i]) : "--", rl.GRAY, id = i) && lobby_count > int(i) {
+            }, lobby_count > int(i) ? net.fmt_lobby_name(buf[:], &network.lobbyEntries.data[i]) : "--", rl.GRAY, id = i) && lobby_count > int(i) {
                 if (!net.request_join_lobby(network, network.lobbyEntries.data[i].endpoint)) {
                     network.state = .Failed
                     return

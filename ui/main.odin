@@ -43,10 +43,15 @@ InputState :: struct {
     leftButton: MouseState,
 }
 
+FrameBehaviour :: bit_set [enum {
+    Draw,
+    Update,
+}]
+
 FrameInfo :: struct {
     lastInputState: InputState,
     inputState: InputState,
-    virtual: bool,
+    behaviour: FrameBehaviour,
 }
 
 RowDirection :: enum {
@@ -134,7 +139,7 @@ within_button :: proc(uiFrameInfo: ^FrameInfo, rectangle: rl.Rectangle, text: st
     col := color / rl.Color { 2, 2, 2, 1 } + rl.Color{255, 255, 255, 0} / 2
     col2 := color / rl.Color { 3, 3, 3, 1 } + rl.Color{255, 255, 255, 0} / 3 * 2
 
-    if !uiFrameInfo.virtual {
+    if .Draw in uiFrameInfo.behaviour {
         rl.DrawRectangleRec(rectangle, col)
     }
     within_button := within_rectangle(rectangle, uiFrameInfo.inputState.mousePos)
@@ -144,7 +149,7 @@ within_button :: proc(uiFrameInfo: ^FrameInfo, rectangle: rl.Rectangle, text: st
         ui.activeId = id
 
         if mouse_down {
-            if !uiFrameInfo.virtual {
+            if .Draw in uiFrameInfo.behaviour {
                 rl.DrawRectangleRec(rectangle, col2)
             }
         }
@@ -157,7 +162,7 @@ within_button :: proc(uiFrameInfo: ^FrameInfo, rectangle: rl.Rectangle, text: st
     pressed := false
 
     if id == ui.activeId {
-        if !uiFrameInfo.virtual {
+        if .Draw in uiFrameInfo.behaviour {
             rl.DrawRectangleLines(i32(rectangle.x), i32(rectangle.y), i32(rectangle.width), i32(rectangle.height), rl.BLACK)
         }
         pressed = is_left_button_pressed(uiFrameInfo)
@@ -168,18 +173,18 @@ within_button :: proc(uiFrameInfo: ^FrameInfo, rectangle: rl.Rectangle, text: st
 
     text_width := rl.MeasureText(str, BUTTON_FONT_SIZE)
 
-    if !uiFrameInfo.virtual {
+    if .Draw in uiFrameInfo.behaviour {
         rl.DrawText(str, i32(rectangle.x + rectangle.width/2) - i32(text_width)/2, i32(rectangle.y + rectangle.height/2) - BUTTON_FONT_SIZE/2, BUTTON_FONT_SIZE, rl.BLACK)
     }
 
-    return within_button
+    return within_button && .Update in uiFrameInfo.behaviour
 }
 
 text_display :: proc(uiFrameInfo: ^FrameInfo, rectangle: rl.Rectangle, text: string, color: rl.Color, text_size: i32 = BUTTON_FONT_SIZE, id := #caller_location, ui := default_ui) {
     rectangle := rectangle
     update_layout(&rectangle, ui)
 
-    if uiFrameInfo.virtual {
+    if .Draw not_in uiFrameInfo.behaviour {
         return
     }
 

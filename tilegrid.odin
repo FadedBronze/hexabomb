@@ -211,7 +211,7 @@ hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player, loc := #caller_loca
         ui.active_id()^ = id
     }
 
-    if player.virtual {
+    if .Draw not_in player.behaviour {
         return
     }
 
@@ -219,7 +219,7 @@ hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player, loc := #caller_loca
         return
     }
 
-    halfgrid :=  get_tile_grid_pos(tileGrid, player.inputState.mousePos)
+    halfgrid := get_tile_grid_pos(tileGrid, player.inputState.mousePos)
 
     if player.editMode == .Clicking {
         if player.activeTileId != 0 {

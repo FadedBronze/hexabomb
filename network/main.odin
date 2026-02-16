@@ -340,8 +340,7 @@ request_join_lobby :: proc(network: ^Network($I), endpoint: net.Endpoint) -> boo
     return broadcast_packet(network, &packet, target = endpoint)
 }
 
-fmt_lobby_name :: proc(lobby: ^LobbyEntry) -> string {
-    buf: [32]u8
+fmt_lobby_name :: proc(buf: []u8, lobby: ^LobbyEntry) -> string {
     return utils.concatenate(buf[:], net.endpoint_to_string(lobby.endpoint), " | ", lobby.name)
 }
 

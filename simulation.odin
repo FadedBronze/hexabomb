@@ -27,47 +27,52 @@ SimulationEntity :: struct {
 
 DecayFn :: proc(t: f32) -> f32
 
-Particle :: struct {
-    followEntityId: u32,
-    position: la.Vector2f32,
-    velocity: la.Vector2f32,
+ParticleBase :: struct {
     colors: []rl.Color,
     friction: f32,
-    timeLeftSeconds: f32,
     initialTimeSeconds: f32,
-    timeTillSummon: f32,
     summonFrequency: f32,
     size: f32,
     summonQuantity: u32,
-    summon: ^Particle,
+    summon: ^ParticleBase,
     sizeDecay: DecayFn,
     colorDecay: DecayFn,
     shape: enum {
         Circle,
         Hexagon,
     },
+    speed: f32,
+    inheritVelocity: f32,
 }
 
-explosion_mini := Particle {
+Particle :: struct {
+    using base: ^ParticleBase,
+    followEntityId: u32,
+    position: la.Vector2f32,
+    velocity: la.Vector2f32,
+    timeLeftSeconds: f32,
+    timeTillSummon: f32,
+}
+
+explosion_mini := ParticleBase{
+    speed = 150,
     friction = 0.01,
-    position = {0, 0},
-    velocity = {100, 100},
     colors = []rl.Color{
         {0, 0, 0, 255},
         {0, 0, 0, 0},
     },
     colorDecay = proc(t: f32) -> f32 { return math.pow(t, 0.5) },
-    sizeDecay = proc(t: f32) -> f32 { return 1 },
+    sizeDecay = constant,
     size = 10,
-    timeLeftSeconds = 0.2,
     initialTimeSeconds = 0.2,
     shape = .Circle,
 }
 
-explosion_middle := Particle {
+linear := proc(t: f32) -> f32 { return t }
+constant := proc(t: f32) -> f32 { return 1 }
+
+explosion_middle := ParticleBase{
     friction = 0.01,
-    position = {0, 0},
-    velocity = {200, 200},
     colors = []rl.Color{
         {255, 255, 255, 255},
         {255, 125, 0, 255},
@@ -75,41 +80,38 @@ explosion_middle := Particle {
         {255, 0, 0, 255},
         {255, 0, 0, 255},
     },
-    colorDecay = proc(t: f32) -> f32 { return t },
-    sizeDecay = proc(t: f32) -> f32 { return 1 },
+    colorDecay = linear,
+    sizeDecay = constant,
     size = 5,
-    timeLeftSeconds = 0.2,
     initialTimeSeconds = 0.2,
     shape = .Circle,
-    timeTillSummon = 0.18,
     summonQuantity = 4,
-    summon = &explosion_mini
+    summon = &explosion_mini,
+    speed = 300,
+    summonFrequency = 1 / 0.18,
 }
 
-explosion := Particle {
-    position = {0, 0},
-    velocity = {0, 0},
+explosion := ParticleBase {
     colors = []rl.Color{
         {255, 255, 255, 255},
         {255, 125, 0, 255},
         {0, 0, 0, 255},
         {0, 0, 0, 0}
     },
-    colorDecay = proc(t: f32) -> f32 { return math.pow(t, 1) },
-    sizeDecay = proc(t: f32) -> f32 { return t },
+    colorDecay = linear,
+    sizeDecay = linear,
     size = 50,
-    timeLeftSeconds = 0.15,
     initialTimeSeconds = 0.15,
     shape = .Circle,
     friction = 0,
-    timeTillSummon = 0.13,
     summonQuantity = 6,
     summon = &explosion_middle,
+    summonFrequency = 1 / 0.13
 }
 
-trail_particle := Particle {
-    position = {0, 0},
-    velocity = {100, 100},
+trail_particle := ParticleBase {
+    speed = 150,
+    inheritVelocity = 0.2,
     colors = []rl.Color{
         {255, 255, 255, 255},
         {255, 125, 0, 255},
@@ -120,14 +122,11 @@ trail_particle := Particle {
     colorDecay = proc(t: f32) -> f32 { return math.pow(t, 1) },
     sizeDecay = proc(t: f32) -> f32 { return 1 - t },
     size = 15,
-    timeLeftSeconds = 0.5,
     initialTimeSeconds = 0.5,
     shape = .Circle,
 }
 
-trail_emitter := Particle {
-    position = {0, 0},
-    velocity = {0, 0},
+trail_emitter := ParticleBase {
     colors = []rl.Color{
         {0, 0, 0, 0}
     },
@@ -137,22 +136,6 @@ trail_emitter := Particle {
     summonFrequency = 25,
     summonQuantity = 6,
     summon = &trail_particle,
-}
-
-ParticlePreset :: enum {
-    Trail,
-    Explosion,
-}
-
-particle_preset :: proc(particle: ParticlePreset, func := proc(p: ^Particle) {}) -> (p: Particle) {
-    switch particle {
-    case .Trail:
-        p = trail_emitter
-    case .Explosion:
-        p = explosion
-    }
-    func(&p)
-    return p
 }
 
 blend_two_colors :: proc(b: rl.Color, a: rl.Color, t: f32) -> rl.Color {
@@ -230,21 +213,15 @@ simulate_particles :: proc(game: ^Game, dt: f32) -> (completed_particles: bool) 
                 particle.timeTillSummon = 1 / particle.summonFrequency
 
                 for _ in 0..<particle.summonQuantity {
-                    new_particle := particle.summon^
-
-                    angle := rand.float32() * math.PI * 2
-                    vel := la.vector_length(new_particle.velocity) * la.Vector2f32{math.cos(angle), math.sin(angle)}
-                    new_particle.velocity = vel
+                    new_particle := add_particle(game, create_particle(particle.summon))
 
                     if following {
-                        new_particle.velocity += followingEntity.velocity * 0.2
+                        new_particle.velocity += followingEntity.velocity * particle.inheritVelocity
                     } else {
-                        new_particle.velocity += particle.velocity * 0.2
+                        new_particle.velocity += particle.velocity * particle.inheritVelocity
                     }
 
                     new_particle.position = particle.position
-
-                    sm.append_elem(&game.particles, new_particle)
                 }
             }
         }
@@ -364,7 +341,7 @@ damage_tile :: proc(game: ^Game, halfGridPos: HalfGridPosition, amount: u8) {
     tile := get_tile(&game.tileGrid, halfGridPos)
 
     if tile.type == .Landmine {
-        add_particle(game, halfGridPos, particle_preset(.Explosion))
+        add_particle(game, &explosion, opts={halfgridPos=halfGridPos})
 
         for direction in directions {
             for i in 1..<3 {
@@ -413,9 +390,32 @@ append_entityId :: proc(tile: ^Tile, entityId: u32) {
     }
 }
 
-add_particle :: proc(game: ^Game, halfgridPos: HalfGridPosition, particle: Particle) {
-    particle := particle
-    particle.position = get_screen_position(&game.tileGrid, halfgridPos)
+AddParticleOpts :: struct {
+    halfgridPos: HalfGridPosition, 
+}
+
+create_particle :: proc(base: ^ParticleBase) -> (p: Particle) {
+    p.base = base
+    p.timeTillSummon = 1 / base.summonFrequency
+    p.timeLeftSeconds = base.initialTimeSeconds
+
+    angle := rand.float32() * math.PI * 2
+    vel := base.speed * la.Vector2f32{math.cos(angle), math.sin(angle)}
+    p.velocity = vel
+
+    return p
+}
+
+add_particle :: proc(game: ^Game, base: ^ParticleBase, opts := AddParticleOpts{}) -> ^Particle {
+    particle := create_particle(base)
+    
+    particle.position = get_screen_position(&game.tileGrid, opts.halfgridPos)
+
+    if sm.push(&game.particles, particle) {
+        return &game.particles.data[game.particles.len-1]
+    }
+
+    return nil
 }
 
 add_entity :: proc(game: ^Game, currentPlayerIndex: u8, halfgridPos: HalfGridPosition, entity: SimulationEntity, type: EntityType) -> (entityId: u32) {
@@ -448,8 +448,6 @@ add_cannonball :: proc(game: ^Game, cannonPos: HalfGridPosition, halfgridPos: Ha
         damage = game.tileTypeStats[.BlastTarget].damage
     }, EntityType.Shot)
 
-    p := particle_preset(.Trail)
+    p := add_particle(game, &trail_emitter, opts={halfgridPos=halfgridPos})
     p.followEntityId = id
-
-    add_particle(game, halfgridPos, p)
 }
