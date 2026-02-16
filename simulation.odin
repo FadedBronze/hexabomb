@@ -47,60 +47,86 @@ Particle :: struct {
     },
 }
 
+explosion_mini := Particle {
+    friction = 0.01,
+    position = {0, 0},
+    velocity = {100, 100},
+    colors = []rl.Color{
+        {0, 0, 0, 255},
+        {0, 0, 0, 0},
+    },
+    colorDecay = proc(t: f32) -> f32 { return math.pow(t, 0.5) },
+    sizeDecay = proc(t: f32) -> f32 { return 1 },
+    size = 10,
+    timeLeftSeconds = 0.2,
+    initialTimeSeconds = 0.2,
+    shape = .Circle,
+}
+
+explosion_middle := Particle {
+    friction = 0.01,
+    position = {0, 0},
+    velocity = {200, 200},
+    colors = []rl.Color{
+        {255, 255, 255, 255},
+        {255, 125, 0, 255},
+        {255, 125, 0, 255},
+        {255, 0, 0, 255},
+        {255, 0, 0, 255},
+    },
+    colorDecay = proc(t: f32) -> f32 { return t },
+    sizeDecay = proc(t: f32) -> f32 { return 1 },
+    size = 5,
+    timeLeftSeconds = 0.2,
+    initialTimeSeconds = 0.2,
+    shape = .Circle,
+    timeTillSummon = 0.18,
+    summonQuantity = 4,
+    summon = &explosion_mini
+}
+
 explosion := Particle {
     position = {0, 0},
     velocity = {0, 0},
     colors = []rl.Color{
-        {0, 0, 0, 255},
         {255, 255, 255, 255},
         {255, 125, 0, 255},
+        {0, 0, 0, 255},
+        {0, 0, 0, 0}
     },
-    colorDecay = proc(t: f32) -> f32 { return math.pow_f32(t, 20) },
-    sizeDecay = proc(t: f32) -> f32 { return math.sin_f32(t*51) },
-    size = 25,
-    timeLeftSeconds = 1.0,
-    initialTimeSeconds = 1.0,
-    timeTillSummon = 0.9,
-    summonFrequency = 1,
-    shape = .Hexagon,
+    colorDecay = proc(t: f32) -> f32 { return math.pow(t, 1) },
+    sizeDecay = proc(t: f32) -> f32 { return t },
+    size = 50,
+    timeLeftSeconds = 0.15,
+    initialTimeSeconds = 0.15,
+    shape = .Circle,
     friction = 0,
-    summonQuantity = 8,
-    summon = &Particle {
-        friction = 0.2,
-        position = {0, 0},
-        velocity = {200, 200},
-        colors = []rl.Color{
-            {255, 255, 255, 255},
-            {255, 125, 0, 255},
-            {255, 125, 0, 255},
-            {255, 0, 0, 255},
-            {255, 0, 0, 255},
-        },
-        colorDecay = proc(t: f32) -> f32 { return t },
-        sizeDecay = proc(t: f32) -> f32 { return math.sin_f32(t*89)/8 + 7/8 },
-        size = 45,
-        timeLeftSeconds = 0.2,
-        initialTimeSeconds = 0.2,
-        shape = .Circle,
-    }
+    timeTillSummon = 0.13,
+    summonQuantity = 6,
+    summon = &explosion_middle,
 }
 
-blend_two_colors :: proc(a: rl.Color, b: rl.Color, t: f32) -> rl.Color {
-    rr := f32(a.r - b.r) * t + f32(b.r)
-    gg := f32(a.g - b.g) * t + f32(b.g)
-    bb := f32(a.b - b.b) * t + f32(b.b)
-    aa := f32(a.a - b.a) * t + f32(b.a)
+blend_two_colors :: proc(b: rl.Color, a: rl.Color, t: f32) -> rl.Color {
+    rr := (f32(a.r) - f32(b.r)) * t + f32(b.r)
+    gg := (f32(a.g) - f32(b.g)) * t + f32(b.g)
+    bb := (f32(a.b) - f32(b.b)) * t + f32(b.b)
+    aa := (f32(a.a) - f32(b.a)) * t + f32(b.a)
 
     return rl.Color{u8(rr), u8(gg), u8(bb), u8(aa)}
 }
 
 blend_colors :: proc(colors: []rl.Color, t: f32) -> rl.Color {
+    t := t
+    if t == 1 {
+        t = 0.999
+    }
+
     curr := t * f32(len(colors)-1)
 
     colorIdxDown: int = int(curr)
-    colorIdxUp: int = int(curr+1)
+    colorIdxUp: int = int(curr)+1
 
-    t := (curr - f32(colorIdxDown)) / f32(len(colors))
+    t = (curr - f32(colorIdxDown)) / f32(len(colors))
 
     return blend_two_colors(colors[colorIdxDown], colors[colorIdxUp], t)
 }
@@ -149,7 +175,7 @@ simulate_particles :: proc(game: ^Game, dt: f32) -> (completed_particles: bool) 
             }
         }
 
-        t := particle.timeLeftSeconds / particle.initialTimeSeconds
+        t := elapsed / particle.initialTimeSeconds
 
         color := blend_colors(
             particle.colors,
