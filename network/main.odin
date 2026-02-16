@@ -152,7 +152,7 @@ import vl "core:mem/virtual"
 find_device_ip :: proc(testing: bool) -> net.IP4_Address {
     addr := net.IP4_Loopback
 
-    buf: [40000]u8
+    buf: [50000]u8
     arena: vl.Arena
     err := vl.arena_init_buffer(&arena, buf[:])
     assert(err == nil)
@@ -439,7 +439,7 @@ all_inputs_uptodate :: proc(network: ^Network($I)) -> bool {
 }
 
 recieve_messages :: proc(network: ^Network($I)) -> bool {
-    buf: [size_of(Packet(I))*8]u8
+    buf: [256]u8
 
     for {
         {

@@ -130,7 +130,7 @@ defaultGameStats := GameStats{
 }
 
 MAX_ENTITIES :: 32
-MAX_PARTICLES :: 128
+MAX_PARTICLES :: 1024
 
 Game :: struct {
     state: GameState,
@@ -361,7 +361,7 @@ place_tile :: proc(game: ^Game, currentPlayerIndex: u8) {
                 damage = game.tileTypeStats[.BlastTarget].cost
             }, EntityType.Nuke)
             
-            add_particle(game, halfgridPos, explosion)
+            add_particle(game, halfgridPos, particle_preset(.Explosion))
         }
     case .MortarTarget:
         if pay_active_tile_cost(game, player) {
@@ -369,24 +369,14 @@ place_tile :: proc(game: ^Game, currentPlayerIndex: u8) {
                 damage = activeTile.damage
             }, EntityType.MortarShot)
 
-            add_particle(game, halfgridPos, explosion)
+            add_particle(game, halfgridPos, particle_preset(.Explosion))
 
             player.activeTileId = 0
             player.editMode = .Clicking
         }
     case .BlastTarget:
         if nextToActiveTile && pay_active_tile_cost(game, player) {
-            pos := get_screen_position(&game.tileGrid, activeTileHalfgridPos)
-            fwd_pos := get_screen_position(&game.tileGrid, activeTileHalfgridPos - directions[dir])
-            vel := (fwd_pos - pos)
-
-            add_entity(game, currentPlayerIndex, halfgridPos, SimulationEntity {
-                shot = Shot {
-                    velocity = vel * CANNONBALL_SPEED,
-                    position = fwd_pos + (pos - fwd_pos) * 0.25
-                },
-                damage = game.tileTypeStats[.BlastTarget].damage
-            }, EntityType.Shot)
+            add_cannonball(game, activeTileHalfgridPos, halfgridPos, currentPlayerIndex, dir)
 
             player.activeTileId = 0
             player.editMode = .Clicking

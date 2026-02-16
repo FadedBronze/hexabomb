@@ -69,7 +69,7 @@ _get_handle :: proc(file: string) -> (ok: bool, handle: os.Handle) {
 msg :: proc(file: string, data: ..any, loc := #caller_location) {
     t := time.now()
 
-    buffer: [128]u8
+    buffer: [256]u8
     sb := strings.builder_from_slice(buffer[:])
 
     ok, handle := _get_handle(file)

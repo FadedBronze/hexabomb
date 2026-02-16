@@ -28,6 +28,7 @@ SimulationEntity :: struct {
 DecayFn :: proc(t: f32) -> f32
 
 Particle :: struct {
+    followEntityId: u32,
     position: la.Vector2f32,
     velocity: la.Vector2f32,
     colors: []rl.Color,
@@ -106,6 +107,54 @@ explosion := Particle {
     summon = &explosion_middle,
 }
 
+trail_particle := Particle {
+    position = {0, 0},
+    velocity = {100, 100},
+    colors = []rl.Color{
+        {255, 255, 255, 255},
+        {255, 125, 0, 255},
+        {255, 0, 0, 255},
+        {0, 0, 0, 255},
+        {0, 0, 0, 0}
+    },
+    colorDecay = proc(t: f32) -> f32 { return math.pow(t, 1) },
+    sizeDecay = proc(t: f32) -> f32 { return 1 - t },
+    size = 15,
+    timeLeftSeconds = 0.5,
+    initialTimeSeconds = 0.5,
+    shape = .Circle,
+}
+
+trail_emitter := Particle {
+    position = {0, 0},
+    velocity = {0, 0},
+    colors = []rl.Color{
+        {0, 0, 0, 0}
+    },
+    colorDecay = proc(t: f32) -> f32 { return math.pow(t, 1) },
+    sizeDecay = proc(t: f32) -> f32 { return t },
+    shape = .Circle,
+    summonFrequency = 25,
+    summonQuantity = 6,
+    summon = &trail_particle,
+}
+
+ParticlePreset :: enum {
+    Trail,
+    Explosion,
+}
+
+particle_preset :: proc(particle: ParticlePreset, func := proc(p: ^Particle) {}) -> (p: Particle) {
+    switch particle {
+    case .Trail:
+        p = trail_emitter
+    case .Explosion:
+        p = explosion
+    }
+    func(&p)
+    return p
+}
+
 blend_two_colors :: proc(b: rl.Color, a: rl.Color, t: f32) -> rl.Color {
     rr := (f32(a.r) - f32(b.r)) * t + f32(b.r)
     gg := (f32(a.g) - f32(b.g)) * t + f32(b.g)
@@ -116,6 +165,12 @@ blend_two_colors :: proc(b: rl.Color, a: rl.Color, t: f32) -> rl.Color {
 }
 
 blend_colors :: proc(colors: []rl.Color, t: f32) -> rl.Color {
+    assert(len(colors)>0)
+
+    if len(colors) == 1 {
+        return colors[0]
+    }
+
     t := t
     if t == 1 {
         t = 0.999
@@ -143,16 +198,29 @@ simulate_particles :: proc(game: ^Game, dt: f32) -> (completed_particles: bool) 
 
     for i in 0..<game.particles.len {
         particle := sm.get_ptr(&game.particles, i)
+        following := particle.followEntityId != 0
+
+        particle.timeLeftSeconds -= dt
+
+        if particle.timeLeftSeconds < 0 && !following {
+            completed += 1
+            continue
+        }
+
+        followingEntity := following ? sm.get_ptr(&game.entities, int(particle.followEntityId-1)) : nil
+        following_has_completed := following && followingEntity.completed
+        
+        if following_has_completed {
+            completed += 1
+            continue
+        }
 
         elapsed := particle.initialTimeSeconds - particle.timeLeftSeconds
 
-        particle.position += particle.velocity * dt * math.pow_f32(particle.friction, elapsed)
-        
-        particle.timeLeftSeconds -= dt
-
-        if particle.timeLeftSeconds < 0 {
-            completed += 1
-            continue
+        if following {
+            particle.position = followingEntity.position
+        } else {
+            particle.position += particle.velocity * dt * math.pow_f32(1+particle.friction, elapsed)
         }
 
         particle.timeTillSummon -= dt
@@ -167,6 +235,12 @@ simulate_particles :: proc(game: ^Game, dt: f32) -> (completed_particles: bool) 
                     angle := rand.float32() * math.PI * 2
                     vel := la.vector_length(new_particle.velocity) * la.Vector2f32{math.cos(angle), math.sin(angle)}
                     new_particle.velocity = vel
+
+                    if following {
+                        new_particle.velocity += followingEntity.velocity * 0.2
+                    } else {
+                        new_particle.velocity += particle.velocity * 0.2
+                    }
 
                     new_particle.position = particle.position
 
@@ -259,8 +333,6 @@ simulate_entities :: proc(game: ^Game, dt: f32) {
             if !within_halfgrid_range(game.tileGrid.size, halfgridPos) {
                 complete_entity(game, entity)
             }
-
-            rl.DrawCircle(i32(shot.position.x), i32(shot.position.y), size, rl.BLACK)
         }
     }
 
@@ -292,6 +364,8 @@ damage_tile :: proc(game: ^Game, halfGridPos: HalfGridPosition, amount: u8) {
     tile := get_tile(&game.tileGrid, halfGridPos)
 
     if tile.type == .Landmine {
+        add_particle(game, halfGridPos, particle_preset(.Explosion))
+
         for direction in directions {
             for i in 1..<3 {
                 damagedTile := get_tile(&game.tileGrid, direction*i16(i) + halfGridPos)
@@ -342,11 +416,9 @@ append_entityId :: proc(tile: ^Tile, entityId: u32) {
 add_particle :: proc(game: ^Game, halfgridPos: HalfGridPosition, particle: Particle) {
     particle := particle
     particle.position = get_screen_position(&game.tileGrid, halfgridPos)
-
-    sm.push(&game.particles, particle)
 }
 
-add_entity :: proc(game: ^Game, currentPlayerIndex: u8, halfgridPos: HalfGridPosition, entity: SimulationEntity, type: EntityType) {
+add_entity :: proc(game: ^Game, currentPlayerIndex: u8, halfgridPos: HalfGridPosition, entity: SimulationEntity, type: EntityType) -> (entityId: u32) {
     tile := get_tile(&game.tileGrid, halfgridPos)
 
     append_entityId(tile, u32(game.entities.len)+1)
@@ -359,4 +431,25 @@ add_entity :: proc(game: ^Game, currentPlayerIndex: u8, halfgridPos: HalfGridPos
     entity.halfgridPos = halfgridPos
     entity.completed = false
     entity.type = type
+
+    return u32(game.entities.len-1)+1
+}
+
+add_cannonball :: proc(game: ^Game, cannonPos: HalfGridPosition, halfgridPos: HalfGridPosition, currentPlayerIdx: u8, dir: HexDirection) {
+    pos := get_screen_position(&game.tileGrid, cannonPos)
+    fwd_pos := get_screen_position(&game.tileGrid, cannonPos - directions[dir])
+    vel := (fwd_pos - pos)
+
+    id := add_entity(game, currentPlayerIdx, halfgridPos, SimulationEntity {
+        shot = Shot {
+            velocity = vel * CANNONBALL_SPEED,
+            position = fwd_pos + (pos - fwd_pos) * 0.25
+        },
+        damage = game.tileTypeStats[.BlastTarget].damage
+    }, EntityType.Shot)
+
+    p := particle_preset(.Trail)
+    p.followEntityId = id
+
+    add_particle(game, halfgridPos, p)
 }
