@@ -3,6 +3,7 @@ import "core:math"
 import rl "vendor:raylib"
 import la "core:math/linalg"
 import "ui"
+import sm "core:container/small_array"
 
 MAX_GRID_SIZE :: 32 
 HALF_MAX_GRID_SIZE :: MAX_GRID_SIZE / 2
@@ -201,16 +202,20 @@ get_active_tile :: proc(tilegrid: ^TileGrid, player: ^Player) -> (^Tile, HalfGri
     return &tilegrid.tiles[idx], HalfGridPosition{i16(x)-HALF_MAX_GRID_SIZE, i16(y)-HALF_MAX_GRID_SIZE}
 }
 
-hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player, game_ui: ^ui.UI, id := #caller_location) {
-    if game_ui.activeId == ui.empty_id() {
-        game_ui.activeId = id
+hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player, loc := #caller_location) {
+    id := ui.UI_ID {
+        loc = loc,
+    }
+
+    if ui.active_id()^ == ui.empty_id() {
+        ui.active_id()^ = id
     }
 
     if player.virtual {
         return
     }
 
-    if game_ui.activeId != id {
+    if ui.active_id()^ != id {
         return
     }
 
@@ -375,7 +380,7 @@ render_gameboard :: proc(game: ^Game, currentPlayerIndex: u8) {
                 continue
             }
 
-            entity := game.entities[entityId-1]
+            entity := sm.get_ptr(&game.entities, int(entityId-1))
 
             if entity.playerIndex == currentPlayerIndex {
                 spos := get_screen_position(&game.tileGrid, pos)

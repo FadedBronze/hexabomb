@@ -1,11 +1,11 @@
 package network
 
 import "core:net"
-import "core:strings"
 import "core:time"
 import "core:container/queue"
 import "core:encoding/cbor"
 import sm "core:container/small_array"
+import "../utils/"
 
 import "../log"
 
@@ -147,11 +147,18 @@ Network :: struct($I: typeid) {
     loggingEnabled: bool,
 }
 
+import vl "core:mem/virtual"
+
 find_device_ip :: proc(testing: bool) -> net.IP4_Address {
     addr := net.IP4_Loopback
 
+    buf: [40000]u8
+    arena: vl.Arena
+    err := vl.arena_init_buffer(&arena, buf[:])
+    assert(err == nil)
+
     if !testing {
-        if ifaces, err := net.enumerate_interfaces(); err == .None {
+        if ifaces, err := net.enumerate_interfaces(allocator = vl.arena_allocator(&arena)); err == .None {
             for iface in ifaces {
                 for unicast in iface.unicast {
                     router := false
@@ -228,7 +235,7 @@ find_available_discovery_port :: proc(network: ^Network($I)) -> (ok: bool, disco
 init :: proc(network: ^Network($T), port: int, singleMachineTesting: bool) -> (success: bool) { 
     network.singleMachineTesting = singleMachineTesting
     addr := net.IP4_Loopback
-
+    
     if !singleMachineTesting {
         addr = find_device_ip(singleMachineTesting)
 
@@ -237,7 +244,7 @@ init :: proc(network: ^Network($T), port: int, singleMachineTesting: bool) -> (s
             return false
         }
     }
-
+    
     sock, err := net.make_bound_udp_socket(net.IP4_Any, port)
     net.set_blocking(sock, false)
 
@@ -247,7 +254,7 @@ init :: proc(network: ^Network($T), port: int, singleMachineTesting: bool) -> (s
     }
 
     ok, discoveryPort, discovery := find_available_discovery_port(network)
-
+    
     if !ok {
         return false
     }
@@ -259,7 +266,7 @@ init :: proc(network: ^Network($T), port: int, singleMachineTesting: bool) -> (s
         log.msg("error", err)
         return false
     }
-
+    
     network.discovery = discovery
     network.socket = sock
     network.myEndpoint = {
@@ -269,9 +276,9 @@ init :: proc(network: ^Network($T), port: int, singleMachineTesting: bool) -> (s
     network.mask = net.IP4_Address{255, 255, 255, 0}
     network.lobby = {}
     network.loggingEnabled = true
-    
+ 
     queue.init(&network.inputQueue)
-
+    
     return true
 }
 
@@ -334,7 +341,8 @@ request_join_lobby :: proc(network: ^Network($I), endpoint: net.Endpoint) -> boo
 }
 
 fmt_lobby_name :: proc(lobby: ^LobbyEntry) -> string {
-    return strings.concatenate({net.endpoint_to_string(lobby.endpoint), " | ", lobby.name})
+    buf: [32]u8
+    return utils.concatenate(buf[:], net.endpoint_to_string(lobby.endpoint), " | ", lobby.name)
 }
 
 client_is_lobby_master :: proc(network: ^Network($I)) -> bool {
@@ -354,11 +362,11 @@ retrieve_lobby_entries :: proc(network: ^Network($I), broadcast: ^BroadcastLobby
 }
 
 recieve_discovery_messages :: proc(network: ^Network($I)) -> bool {
-    buf: [size_of(Packet(I))*8]u8
+    buf: [256]u8
     
     for {
         length, _, err := net.recv_udp(network.discovery, buf[:])
-        
+
         #partial switch err {
         case .Connection_Refused:
             continue
@@ -372,7 +380,7 @@ recieve_discovery_messages :: proc(network: ^Network($I)) -> bool {
         
         broadcast: Packet(I)
         {
-            err := cbor.unmarshal_from_bytes(buf[:], &broadcast)
+            err := cbor.unmarshal_from_bytes(buf[:], &broadcast, allocator = context.temp_allocator)
             
             if err != nil {
                 log.msg("error", err)
@@ -449,7 +457,7 @@ recieve_messages :: proc(network: ^Network($I)) -> bool {
 
         broadcast: Packet(I)
         {
-            err := cbor.unmarshal_from_bytes(buf[:], &broadcast)
+            err := cbor.unmarshal_from_bytes(buf[:], &broadcast, allocator = context.temp_allocator)
 
             if err != nil {
                 log.msg("error", err)
@@ -631,7 +639,7 @@ broadcast_packet :: proc(
         log.msg("network", broadcast_msg, packet)
     }
 
-    payload, err := cbor.marshal_into_bytes(packet^)
+    payload, err := cbor.marshal_into_bytes(packet^, allocator = context.temp_allocator)
 
     if err != nil {
         log.msg("error", err)
@@ -666,7 +674,7 @@ broadcast_recieved_input_state :: proc(network: ^Network($I), frameNumber: u64, 
         endpoint = network.myEndpoint,
     })
 
-    bytes, err := cbor.marshal_into_bytes(packet)
+    bytes, err := cbor.marshal_into_bytes(packet, allocator = context.temp_allocator)
     
     if err != nil {
         log.msg("error", err)

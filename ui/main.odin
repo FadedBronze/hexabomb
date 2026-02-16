@@ -5,12 +5,28 @@ import rn "base:runtime"
 import la "core:math/linalg"
 import strings "core:strings"
 import "core:math/rand"
+import "../utils"
 
 BUTTON_FONT_SIZE :: 22
 
+@(private="file")
+ui_buffer: UI
+
+@(private="file")
+default_ui: ^UI = &ui_buffer
+
+Uniquifier :: union {
+    u64,
+    string,
+}
+
+UI_ID :: struct {
+    loc: rn.Source_Code_Location,
+    uniquifier: Uniquifier,
+}
+
 UI :: struct {
-    nextFreeId: u32,
-    activeId: rn.Source_Code_Location,
+    activeId: UI_ID,
     buttons_length: u16,
     button_offset: u32,
     active_layout: Layout,
@@ -55,7 +71,7 @@ RowLayout :: struct {
     bounds: [2]f32,
 }
 
-row_layout :: proc(ui: ^UI, direction: RowDirection, offset: la.Vector2f32, gap: f32) {
+row_layout :: proc(direction: RowDirection, offset: la.Vector2f32, gap: f32, ui := default_ui) {
     ui.active_layout = RowLayout{
         direction = direction,
         x_offset = offset.x,
@@ -64,7 +80,7 @@ row_layout :: proc(ui: ^UI, direction: RowDirection, offset: la.Vector2f32, gap:
     }
 }
 
-row_layout_end :: proc(ui: ^UI) {
+row_layout_end :: proc(ui := default_ui) {
     ui.active_layout = EmptyLayout{}
 }
 
@@ -72,7 +88,7 @@ within_rectangle :: proc(rect: rl.Rectangle, pos: la.Vector2f32) -> bool {
     return pos.x < rect.x + rect.width && pos.x > rect.x && pos.y < rect.y + rect.height && pos.y > rect.y
 }
 
-update_layout :: proc(ui: ^UI, rectangle: ^rl.Rectangle) {
+update_layout :: proc(rectangle: ^rl.Rectangle, ui := default_ui) {
     #partial switch &layout in &ui.active_layout {
     case RowLayout: 
         rectangle.x = layout.x_offset
@@ -101,14 +117,19 @@ is_left_button_pressed :: proc(uiFrameInfo: ^FrameInfo) -> bool {
     return uiFrameInfo.inputState.leftButton == .Down && uiFrameInfo.lastInputState.leftButton == .Up
 }
 
-button :: proc(ui: ^UI, uiFrameInfo: ^FrameInfo, rectangle: rl.Rectangle, text: string, color: rl.Color, id := #caller_location) -> bool {
-    return within_button(ui, uiFrameInfo, rectangle, text, color, id) && is_left_button_pressed(uiFrameInfo)
+button :: proc(uiFrameInfo: ^FrameInfo, rectangle: rl.Rectangle, text: string, color: rl.Color, loc := #caller_location, id: Uniquifier = 0, ui := default_ui) -> bool {
+    return within_button(uiFrameInfo, rectangle, text, color, id = id, loc = loc, ui = ui) && is_left_button_pressed(uiFrameInfo)
 }
 
-within_button :: proc(ui: ^UI, uiFrameInfo: ^FrameInfo, rectangle: rl.Rectangle, text: string, color: rl.Color, id := #caller_location) -> bool {
+within_button :: proc(uiFrameInfo: ^FrameInfo, rectangle: rl.Rectangle, text: string, color: rl.Color, loc := #caller_location, id: Uniquifier = 0, ui := default_ui) -> bool {
+    id := UI_ID {
+        uniquifier = id,
+        loc = loc,
+    }
+
     rectangle := rectangle
 
-    update_layout(ui, &rectangle)
+    update_layout(&rectangle)
 
     col := color / rl.Color { 2, 2, 2, 1 } + rl.Color{255, 255, 255, 0} / 2
     col2 := color / rl.Color { 3, 3, 3, 1 } + rl.Color{255, 255, 255, 0} / 3 * 2
@@ -130,7 +151,7 @@ within_button :: proc(ui: ^UI, uiFrameInfo: ^FrameInfo, rectangle: rl.Rectangle,
     }
 
     if !within_button && id == ui.activeId {
-        ui.activeId = rn.Source_Code_Location{}
+        ui.activeId = empty_id()
     }
 
     pressed := false
@@ -142,7 +163,8 @@ within_button :: proc(ui: ^UI, uiFrameInfo: ^FrameInfo, rectangle: rl.Rectangle,
         pressed = is_left_button_pressed(uiFrameInfo)
     }
 
-    str := strings.unsafe_string_to_cstring(strings.concatenate({text, "\x00"}))
+    buf: [64]u8
+    str := strings.unsafe_string_to_cstring(utils.concatenate(buf[:], text, "\x00"))
 
     text_width := rl.MeasureText(str, BUTTON_FONT_SIZE)
 
@@ -153,22 +175,22 @@ within_button :: proc(ui: ^UI, uiFrameInfo: ^FrameInfo, rectangle: rl.Rectangle,
     return within_button
 }
 
-text_display :: proc(ui: ^UI, uiFrameInfo: ^FrameInfo, rectangle: rl.Rectangle, text: string, color: rl.Color, text_size: i32 = BUTTON_FONT_SIZE, id := #caller_location) {
+text_display :: proc(uiFrameInfo: ^FrameInfo, rectangle: rl.Rectangle, text: string, color: rl.Color, text_size: i32 = BUTTON_FONT_SIZE, id := #caller_location, ui := default_ui) {
     rectangle := rectangle
-    update_layout(ui, &rectangle)
+    update_layout(&rectangle, ui)
 
     if uiFrameInfo.virtual {
         return
     }
 
-    str := strings.unsafe_string_to_cstring(strings.concatenate({text, "\x00"}))
+    str := strings.unsafe_string_to_cstring(strings.concatenate({text, "\x00"}, allocator=context.temp_allocator))
     text_width := rl.MeasureText(str, text_size)
 
     rl.DrawText(str, i32(rectangle.x + rectangle.width/2) - i32(text_width)/2, i32(rectangle.y + rectangle.height/2) - BUTTON_FONT_SIZE/2, text_size, color)
 }
 
-empty_id :: proc() -> rn.Source_Code_Location {
-    return rn.Source_Code_Location{}
+empty_id :: proc() -> UI_ID {
+    return UI_ID {}
 }
 
 get_button_state :: proc() -> MouseState {
@@ -202,4 +224,8 @@ generate_random_input :: proc(screenSize: [2]f32) -> InputState {
         screenSize = screenSize,
         leftButton = MouseState(rand.float32() * f32(max(MouseState))+1)
     }
+}
+
+active_id :: proc(ui := default_ui) -> ^UI_ID {
+    return &ui.activeId
 }

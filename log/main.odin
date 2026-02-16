@@ -4,6 +4,7 @@ import "core:os"
 import "core:strings"
 import "core:time"
 import "core:fmt"
+import utils "../utils"
 
 FileLogger :: struct {
     handles: map[string]os.Handle,
@@ -14,7 +15,9 @@ FileLogger :: struct {
 _logger: FileLogger
 
 init :: proc(directory: string) {
-    err := os.make_directory(strings.concatenate({"./logs/", directory, "/"}), os.O_CREATE)
+    buf: [64]u8
+    path := utils.concatenate(buf[:], "./logs/", directory, "/")
+    err := os.make_directory(path, os.O_CREATE)
 
     if err != nil && err != .Exist {
         fmt.println(err)
@@ -26,8 +29,10 @@ init :: proc(directory: string) {
 }
 
 clear :: proc(file: string) {
+    buf: [64]u8
+    path := utils.concatenate(buf[:], "./logs/", _logger.directory, "/", file, ".txt")
+
     data: [0]u8
-    path := strings.concatenate({"./logs/", _logger.directory, "/", file, ".txt"})
     ok := os.write_entire_file(path, data[:])
     assert(ok)
 }
@@ -40,7 +45,9 @@ _get_handle :: proc(file: string) -> (ok: bool, handle: os.Handle) {
         return true, handle
     }
 
-    path := strings.concatenate({"./logs/", _logger.directory, "/", file, ".txt"})
+    buf: [64]u8
+    path := utils.concatenate(buf[:], "./logs/", _logger.directory, "/", file, ".txt")
+
     err: os.Error
     handle, err = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREATE)
 
@@ -62,14 +69,9 @@ _get_handle :: proc(file: string) -> (ok: bool, handle: os.Handle) {
 msg :: proc(file: string, data: ..any, loc := #caller_location) {
     t := time.now()
 
-    sb: strings.Builder
-    _, sberr := strings.builder_init(&sb)
+    buffer: [128]u8
+    sb := strings.builder_from_slice(buffer[:])
 
-    if sberr != nil {
-        fmt.println(sberr)
-        assert(false)
-    }
-    
     ok, handle := _get_handle(file)
 
     if !ok {
@@ -89,5 +91,5 @@ msg :: proc(file: string, data: ..any, loc := #caller_location) {
         fmt.println(str)
         fmt.println(err)
         unreachable()
-    }    
+    }
 }
