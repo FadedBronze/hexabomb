@@ -8,6 +8,7 @@ import sm "core:container/small_array"
 Shot :: struct {
     position: la.Vector2f32,
     velocity: la.Vector2f32,
+    last_bounced: HalfGridPosition,
 }
 
 EntityType :: enum {
@@ -262,6 +263,19 @@ simulate_particles :: proc(game: ^Game, dt: f32) -> (completed_particles: bool) 
             )
         }
     }
+    
+    i := 0
+    for i < game.particles.len {
+        particle := sm.get_ptr(&game.particles, i)
+        following := particle.followEntityId != 0
+
+        if particle.timeLeftSeconds > 0 || following {
+            i += 1
+            continue
+        }
+
+        sm.unordered_remove(&game.particles, i)
+    }
 
     return game.particles.len == completed
 }
@@ -301,13 +315,14 @@ simulate_entities :: proc(game: ^Game, dt: f32) {
             tile := get_tile(&game.tileGrid, halfgridPos)
 
             screenHalfPos := get_screen_position(&game.tileGrid, halfgridPos)
+            
+            if !within_halfgrid_range(game.tileGrid.size, halfgridPos) {
+                complete_entity(game, entity)
+                add_particle(game, &explosion, opts={position=entity.position})
+            }
 
-            prevgridpos := get_tile_grid_pos(&game.tileGrid, prevpos)
-
-            prev_tile := get_tile(&game.tileGrid, prevgridpos)
-
-            if prev_tile != tile && prev_tile.playerId - 1 != entity.playerIndex {
-                damage_tile(game, prevgridpos, entity.damage)
+            if shot.last_bounced == halfgridPos {
+                break;
             }
 
             if tile.type == .Shield {
@@ -317,11 +332,12 @@ simulate_entities :: proc(game: ^Game, dt: f32) {
                 vel := (fwd_pos - screenHalfPos)
 
                 shot.velocity = vel * CANNONBALL_SPEED
-            }
-
-            if !within_halfgrid_range(game.tileGrid.size, halfgridPos) {
-                complete_entity(game, entity)
-                add_particle(game, &explosion, opts={position=entity.position})
+                shot.position = get_screen_position(&game.tileGrid, halfgridPos)
+                shot.last_bounced = halfgridPos
+                
+                if tile.playerId != entity.playerIndex+1 {
+                    damage_tile(game, halfgridPos, entity.damage)
+                }
             }
         }
     }
