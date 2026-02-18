@@ -144,7 +144,9 @@ Game :: struct {
 
     playerCount: u8,
     players: [MAX_PLAYERS]Player,
+
     winnerIdx: u8,
+    peeking: bool,
 
     tileGrid: TileGrid,
 
@@ -492,7 +494,7 @@ force_start_next_turn :: proc (game: ^Game) {
         player.energy = game.stats.energyPerRound
         game.rounds += 1
         game.state = .Simulate
-    }
+    }    
 }
 
 start_next_turn :: proc (game: ^Game, currentPlayerIndex: u8) {
@@ -705,12 +707,16 @@ crown_winner :: proc(game: ^Game) {
         }
     }
 
+    fmt.println(lastPlayerCount, lastPlayerIdx)
+
     if lastPlayerCount == 1 {
         assert(lastPlayerIdx >= 0)
         game.winnerIdx = u8(lastPlayerIdx)
         game.state = .Winner
     }
 }
+
+import "core:fmt"
 
 FieldIterator :: struct {
     i: i16,
@@ -1005,52 +1011,59 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
             render_gameboard(game, currentPlayerIndex)
         }
     }
-    
+
     switch game.state {
     case .GameSelector:
         game_selector(game, player)
     case .Winner:
         //TODO -> fix the winner detection code before refactoring this
 
-        //within_button := ui.within_button(rl.Rectangle{
-        //    x = player.inputState.screenSize.x/2 - 100,
-        //    y = player.inputState.screenSize.y/2 - 0,
-        //    width = 100,
-        //    height = 40,
-        //}, "peek", player.color)
+        if !game.peeking {
+            ui.flat_color(rl.Color{ 0, 0, 0, 150 })
+        }
 
-        //if (!within_button || player.inputState.leftButton == .Up) {
-        //    if .Draw in player.behaviour {
-        //        rl.DrawRectangle(0, 0, auto_cast player.inputState.screenSize.x, auto_cast player.inputState.screenSize.y, rl.Color{
-        //            0, 0, 0, 150
-        //        })
-        //    }
+        ui.add_layout(ui.margin_tblr(150, -50, 130, 130, relativity=.FromCenter))
+        ui.add_bounds()
+        
+        if !game.peeking {
+            if game.winnerIdx == currentPlayerIndex {
+                ui.text_display("Victory", rl.WHITE, 50)
+            } else {
+                ui.text_display("Defeat", rl.WHITE, 50)
+            }
+        }
 
-        //    if game.winnerIdx == currentPlayerIndex {
-        //        ui.text_display(player.uiFrameInfo, rl.Rectangle{
-        //            x = player.inputState.screenSize.x/2 - 75,
-        //            y = player.inputState.screenSize.y/2 - 120,
-        //            width = 150,
-        //            height = 150,
-        //        }, "Victory", rl.WHITE, 50)
-        //    } else {
-        //        ui.text_display(player.uiFrameInfo, rl.Rectangle{
-        //            x = player.inputState.screenSize.x/2 - 75,
-        //            y = player.inputState.screenSize.y/2 - 120,
-        //            width = 150,
-        //            height = 150,
-        //        }, "Defeat", rl.WHITE, 50)
-        //    }
+        ui.pop_bounds()
+        ui.pop_layout()
 
-        //    if (ui.button(rl.Rectangle{
-        //        x = player.inputState.screenSize.x/2 - 0,
-        //        y = player.inputState.screenSize.y/2 - 0,
-        //        width = 100,
-        //        height = 40,
-        //    }, "continue", player.color)) {
-        //        game.state = .GameSelector
-        //    }
-        //}
+        ui.add_layout(ui.margin_tblr(50, -150, 130, 130, relativity=.FromCenter))
+        ui.add_bounds()
+
+        ui.add_layout(ui.FlexBox{
+            gap = 10,
+            corner = .TopLeft,
+            direction = .Horizontal,
+        })
+
+        ui.add_bounds({100, 60})
+        peeking := ui.within_button("peek", player.color) && player.inputState.leftButton == .Down
+        if .Update in player.behaviour {
+            game.peeking = peeking
+        }
+        ui.pop_bounds()
+
+        if !game.peeking {
+            ui.add_bounds({100, 60})
+            if (ui.button("continue", player.color)) {
+                game.state = .GameSelector
+            }
+            ui.pop_bounds()
+        }
+        
+        ui.pop_layout()
+
+        ui.pop_bounds()
+        ui.pop_layout()
     case .Paused:
         ui.add_layout(ui.margin_xy(75, 75, relativity=.FromCenter))
         ui.add_bounds()

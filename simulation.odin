@@ -353,6 +353,7 @@ simulate :: proc(game: ^Game, dt: f32) {
         sm.clear(&game.particles)
         game.completed_entities = 0
         game.state = .Playing
+        crown_winner(game)
         return
     }
 }
