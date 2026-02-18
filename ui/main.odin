@@ -222,38 +222,40 @@ end_ui :: proc(ui := default_ui) {
     assert(ui.stackSize == 0)
 }
 
-add_bounds :: proc(bounds: la.Vector2f32 = {0, 0}, ui := default_ui) {
+add_bounds :: proc(bounds: la.Vector2f32 = {1, 1}, ui := default_ui) {
     layout := &ui.layoutStack[ui.stackSize-1]
     layout_bounds := ui.boundsStack[ui.stackSize-1]
 
     b := Bounds {
-        width = bounds.x,
-        height = bounds.y,
+        width = (-1 <= bounds.x && bounds.x <= 1) ? bounds.x * layout_bounds.width : bounds.x,
+        height = (-1 <= bounds.y && bounds.y <= 1) ? bounds.y * layout_bounds.height : bounds.y,
     }
-    
+
     switch &v in layout {
     case nil:
         // Cannot add a bounds onto a bounds
         fmt.println(ui.layoutStack[0:ui.stackSize], ui.stackSize)
         assert(false)
     case FlexBox:
-        assert(bounds.x != 0 && bounds.y != 0)
+        assert(b.width != 0 && b.height != 0)
 
-        x_off: f32
-        y_off: f32
-
+        x_off := .Left not_in v.corner ?\
+            layout_bounds.width + layout_bounds.x - b.width :\ 
+            layout_bounds.x
+        y_off := .Top not_in v.corner ?\ 
+            layout_bounds.height + layout_bounds.y - b.height :\ 
+            layout_bounds.y
+        
         switch v.spacing {
         case .Linear:
-            y_off = .Top not_in v.corner ?\ 
-                layout_bounds.height + layout_bounds.y - v.offset.y - b.height :\ 
-                v.offset.y + layout_bounds.y
-            
-            x_off = .Left not_in v.corner ?\
-                layout_bounds.width + layout_bounds.x - v.offset.x - b.width :\ 
-                v.offset.x + layout_bounds.x
+            //default
         case .Centered:
-            x_off = v.offset.x + layout_bounds.x + layout_bounds.width / 2 - ui.cache.prevFlexOffset[v.id].x / 2
-            y_off = v.offset.y + layout_bounds.y + layout_bounds.height / 2 - ui.cache.prevFlexOffset[v.id].y / 2
+            switch v.direction {
+            case .Horizontal:
+                x_off = layout_bounds.x + layout_bounds.width / 2 - ui.cache.prevFlexOffset[v.id].x / 2
+            case .Vertical:
+                y_off = layout_bounds.y + layout_bounds.height / 2 - ui.cache.prevFlexOffset[v.id].y / 2
+            }
         case .Spaced:
             unimplemented()
         }
@@ -271,11 +273,11 @@ add_bounds :: proc(bounds: la.Vector2f32 = {0, 0}, ui := default_ui) {
             ui.boundsStack[ui.stackSize] = Bounds {
                 width = b.width,
                 height = b.height,
-                x = x_off,
-                y = y_off,
+                x = x_off + (.Left not_in v.corner ? -v.offset.x : v.offset.x),
+                y = y_off + (.Top not_in v.corner ? -v.offset.y : v.offset.y),
             }
             ui.stackSize += 1
-
+            
             v.offset.x += b.width + v.gap
         case .Vertical:
             v.maxSizes.x = max(v.maxSizes.x, b.width)
@@ -289,11 +291,11 @@ add_bounds :: proc(bounds: la.Vector2f32 = {0, 0}, ui := default_ui) {
             ui.boundsStack[ui.stackSize] = Bounds {
                 width = b.width,
                 height = b.height,
-                x = x_off,
-                y = y_off,
+                x = x_off + (.Left not_in v.corner ? -v.offset.x : v.offset.x),
+                y = y_off + (.Top not_in v.corner ? -v.offset.y : v.offset.y),
             }
-
             ui.stackSize += 1
+            
             v.offset.y += b.height + v.gap
         }
     case MarginLayout:

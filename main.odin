@@ -845,6 +845,16 @@ create_player_land :: proc(game: ^Game, id: u8, haldGridPos: HalfGridPosition) {
 
 game_selector :: proc(game: ^Game, player: ^Player) {
     hexagonSize: i32 = 30
+    
+    ui.add_layout(ui.FlexBox{
+        gap = 10,
+        corner = {.Left, .Top},
+        direction = .Horizontal,
+        spacing = .Centered,
+    })
+    ui.add_bounds({630, 1})
+
+    //ui.flat_color(rl.RED)
 
     ui.add_layout(ui.FlexBox{
         gap = 20,
@@ -853,11 +863,10 @@ game_selector :: proc(game: ^Game, player: ^Player) {
         spacing = .Centered,
     })
 
-    ui.add_bounds({700, 200})
+    ui.add_bounds({1, 150})
     ui.add_layout(ui.FlexBox{
         gap = 10,
         corner = {.Left, .Top},
-        spacing = .Centered,
     })
     
     ui.add_bounds({150, 150})
@@ -969,13 +978,12 @@ game_selector :: proc(game: ^Game, player: ^Player) {
     ui.pop_layout()
     ui.pop_bounds()
 
-    ui.add_bounds({700, 100})
-    //ui.flat_color(rl.Color{ 0, 0, 0, 100 })
+    ui.add_bounds({1, 70})
     ui.add_layout(ui.FlexBox{
         gap = 10,
-        direction = .Horizontal,
-        corner = {},
-        spacing = .Centered,
+        direction = .Vertical,
+        corner = {.Top, .Left},
+        spacing = .Linear,
     })
 
     for mode in GameMode {
@@ -983,7 +991,7 @@ game_selector :: proc(game: ^Game, player: ^Player) {
         str := strings.unsafe_string_to_cstring(utils.concatenate(buf[:], gamemode_names[mode], "\x00")) 
         text_size := f32(rl.MeasureText(str, 22))
 
-        ui.add_bounds({text_size + 40, 30})
+        ui.add_bounds({text_size + 45, 30})
 
         ui.add_layout(ui.FlexBox{
             gap = 10,
@@ -1013,6 +1021,9 @@ game_selector :: proc(game: ^Game, player: ^Player) {
     ui.pop_layout()
     ui.pop_bounds()
     
+    ui.pop_layout()
+    ui.pop_bounds()
+
     ui.pop_layout()
 
     rl.DrawCircle(i32(player.inputState.mousePos.x), i32(player.inputState.mousePos.y), 12, rl.BLACK)
@@ -1062,6 +1073,7 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
             gap = 10,
             corner = {.Top, .Left},
             direction = .Horizontal,
+            spacing = .Centered,
         })
 
         ui.add_bounds({100, 60})
