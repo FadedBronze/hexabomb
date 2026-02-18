@@ -133,36 +133,39 @@ Layout :: union {
     FlexBox,
 }
 
-FlexSpacing :: enum {
-    Spread,
-    Center,
+FlexCorner :: bit_set[enum {
     Left,
-    Right,
-}
-
-FlexCorner :: enum {
-    TopLeft,
-    TopRight,
-    BottomLeft,
-    BottomRight,
-}
+    Top,
+}]
 
 FlexDirection :: enum {
     Horizontal,
     Vertical,
 }
 
+FlexSpacing :: enum {
+    Linear,
+    Centered,
+    Spaced,
+}
+
 FlexBox :: struct {
+    //properties
+    id: UI_ID,
     direction: FlexDirection,
     corner: FlexCorner,
+    spacing: FlexSpacing,
     gap: f32,
+
+    //state
+    offset: la.Vector2f32,
+    maxSizes: la.Vector2f32,
 }
 
 MAX_LAYOUT_STACK :: 16
 
 UICache :: struct {
-    offset: la.Vector2f32,
-    maxSizes: la.Vector2f32,
+    prevFlexOffset: map[UI_ID]la.Vector2f32,
 }
 
 Bounds :: struct {
@@ -209,7 +212,6 @@ within_bounds :: proc(rect: rl.Rectangle, pos: la.Vector2f32) -> bool {
 }
 
 begin_ui :: proc(bounds: Bounds, ui := default_ui) {
-    ui.cache = UICache{}
     assert(ui.stackSize == 0)
     ui.boundsStack[ui.stackSize] = bounds
     ui.stackSize += 1
@@ -221,7 +223,7 @@ end_ui :: proc(ui := default_ui) {
 }
 
 add_bounds :: proc(bounds: la.Vector2f32 = {0, 0}, ui := default_ui) {
-    layout := ui.layoutStack[ui.stackSize-1]
+    layout := &ui.layoutStack[ui.stackSize-1]
     layout_bounds := ui.boundsStack[ui.stackSize-1]
 
     b := Bounds {
@@ -229,121 +231,70 @@ add_bounds :: proc(bounds: la.Vector2f32 = {0, 0}, ui := default_ui) {
         height = bounds.y,
     }
     
-    switch v in layout {
+    switch &v in layout {
     case nil:
         // Cannot add a bounds onto a bounds
         fmt.println(ui.layoutStack[0:ui.stackSize], ui.stackSize)
         assert(false)
     case FlexBox:
-        switch v.corner {
-        case .TopLeft:
-            switch v.direction {
-            case .Horizontal:
-                ui.cache.maxSizes.y = max(ui.cache.maxSizes.y, b.height)
+        assert(bounds.x != 0 && bounds.y != 0)
 
-                if ui.cache.offset.x + b.width > layout_bounds.width {
-                    ui.cache.offset.y += ui.cache.maxSizes.y + v.gap
-                    ui.cache.offset.x = 0
-                    ui.cache.maxSizes.y = 0
-                }
+        x_off: f32
+        y_off: f32
 
-                ui.boundsStack[ui.stackSize] = Bounds {
-                    width = b.width,
-                    height = b.height,
-                    x = ui.cache.offset.x + layout_bounds.x,
-                    y = ui.cache.offset.y + layout_bounds.y,
-                }
-                ui.stackSize += 1
+        switch v.spacing {
+        case .Linear:
+            y_off = .Top not_in v.corner ?\ 
+                layout_bounds.height + layout_bounds.y - v.offset.y - b.height :\ 
+                v.offset.y + layout_bounds.y
+            
+            x_off = .Left not_in v.corner ?\
+                layout_bounds.width + layout_bounds.x - v.offset.x - b.width :\ 
+                v.offset.x + layout_bounds.x
+        case .Centered:
+            x_off = v.offset.x + layout_bounds.x + layout_bounds.width / 2 - ui.cache.prevFlexOffset[v.id].x / 2
+            y_off = v.offset.y + layout_bounds.y + layout_bounds.height / 2 - ui.cache.prevFlexOffset[v.id].y / 2
+        case .Spaced:
+            unimplemented()
+        }
 
-                ui.cache.offset.x += b.width + v.gap
-            case .Vertical:
-                ui.cache.maxSizes.x = max(ui.cache.maxSizes.x, b.width)
+        switch v.direction {
+        case .Horizontal:
+            v.maxSizes.y = max(v.maxSizes.y, b.height)
 
-                if ui.cache.offset.y + b.height > layout_bounds.height {
-                    ui.cache.offset.x += ui.cache.maxSizes.x + v.gap
-                    ui.cache.offset.y = 0
-                    ui.cache.maxSizes.x = 0
-                }
-
-                ui.boundsStack[ui.stackSize] = Bounds {
-                    width = b.width,
-                    height = b.height,
-                    x = ui.cache.offset.x + layout_bounds.x,
-                    y = ui.cache.offset.y + layout_bounds.y,
-                }
-
-                ui.stackSize += 1
-                ui.cache.offset.y += b.height + v.gap
+            if v.offset.x + b.width > layout_bounds.width {
+                v.offset.y += v.maxSizes.y + v.gap
+                v.offset.x = 0
+                v.maxSizes.y = 0
             }
-        case .TopRight:
-            switch v.direction {
-            case .Horizontal:
-                unimplemented()
-            case .Vertical:
-                ui.cache.maxSizes.x = max(ui.cache.maxSizes.x, b.width)
 
-                if ui.cache.offset.y + b.height > layout_bounds.height {
-                    ui.cache.offset.x += ui.cache.maxSizes.x + v.gap
-                    ui.cache.offset.y = 0
-                    ui.cache.maxSizes.x = 0
-                }
-
-                ui.boundsStack[ui.stackSize] = Bounds {
-                    width = b.width,
-                    height = b.height,
-                    x = layout_bounds.width + layout_bounds.x - ui.cache.offset.x - b.width,
-                    y = ui.cache.offset.y + layout_bounds.y,
-                }
-
-                ui.stackSize += 1
-                ui.cache.offset.y += b.height + v.gap
+            ui.boundsStack[ui.stackSize] = Bounds {
+                width = b.width,
+                height = b.height,
+                x = x_off,
+                y = y_off,
             }
-        case .BottomLeft:
-            switch v.direction {
-            case .Horizontal:
-                ui.cache.maxSizes.y = max(ui.cache.maxSizes.y, b.height)
+            ui.stackSize += 1
 
-                if ui.cache.offset.x + b.width > layout_bounds.width {
-                    ui.cache.offset.y += ui.cache.maxSizes.y + v.gap
-                    ui.cache.offset.x = 0
-                    ui.cache.maxSizes.y = 0
-                }
+            v.offset.x += b.width + v.gap
+        case .Vertical:
+            v.maxSizes.x = max(v.maxSizes.x, b.width)
 
-                ui.boundsStack[ui.stackSize] = Bounds {
-                    width = b.width,
-                    height = b.height,
-                    x = ui.cache.offset.x + layout_bounds.x,
-                    y = layout_bounds.height + layout_bounds.y - ui.cache.offset.y - b.height,
-                }
-                ui.stackSize += 1
-
-                ui.cache.offset.x += b.width + v.gap
-            case .Vertical:
-                unimplemented()
+            if v.offset.y + b.height > layout_bounds.height {
+                v.offset.x += v.maxSizes.x + v.gap
+                v.offset.y = 0
+                v.maxSizes.x = 0
             }
-        case .BottomRight:
-            switch v.direction {
-            case .Horizontal:
-                ui.cache.maxSizes.y = max(ui.cache.maxSizes.y, b.height)
 
-                if ui.cache.offset.x + b.width > layout_bounds.width {
-                    ui.cache.offset.y += ui.cache.maxSizes.y + v.gap
-                    ui.cache.offset.x = 0
-                    ui.cache.maxSizes.y = 0
-                }
-
-                ui.boundsStack[ui.stackSize] = Bounds {
-                    width = b.width,
-                    height = b.height,
-                    x = layout_bounds.width + layout_bounds.x - ui.cache.offset.x - b.width,
-                    y = layout_bounds.height + layout_bounds.y - ui.cache.offset.y - b.height,
-                }
-                ui.stackSize += 1
-
-                ui.cache.offset.x += b.width + v.gap
-            case .Vertical:
-                unimplemented()
+            ui.boundsStack[ui.stackSize] = Bounds {
+                width = b.width,
+                height = b.height,
+                x = x_off,
+                y = y_off,
             }
+
+            ui.stackSize += 1
+            v.offset.y += b.height + v.gap
         }
     case MarginLayout:
         // Case 1
@@ -409,15 +360,21 @@ add_bounds :: proc(bounds: la.Vector2f32 = {0, 0}, ui := default_ui) {
 
 import "core:fmt"
 
-add_layout :: proc(layout: Layout, ui := default_ui) {
+add_layout :: proc(layout: Layout, ui := default_ui, loc := #caller_location, id: Uniquifier = 0) {
     // should have more bounds then layouts
     assert(ui.layoutStack[ui.stackSize-1] == nil)
     
     bounds := ui.boundsStack[ui.stackSize-1]
     ui.layoutStack[ui.stackSize-1] = layout
 
-    ui.cache.maxSizes = 0
-    ui.cache.offset = 0
+    switch &v in &ui.layoutStack[ui.stackSize-1] {
+    case FlexBox:
+        v.id = UI_ID{
+            uniquifier = id,
+            loc = loc,
+        }
+    case MarginLayout:
+    }
 }
 
 pop_bounds :: proc(ui := default_ui) {
@@ -426,6 +383,19 @@ pop_bounds :: proc(ui := default_ui) {
 }
 
 pop_layout :: proc(ui := default_ui) {
+    switch &v in &ui.layoutStack[ui.stackSize-1] {
+    case FlexBox:
+        if v.direction == .Horizontal {
+            v.offset.y += v.maxSizes.y
+            v.offset.x -= v.gap
+        } else {
+            v.offset.x += v.maxSizes.x
+            v.offset.y -= v.gap
+        }
+
+        ui.cache.prevFlexOffset[v.id] = v.offset
+    case MarginLayout:
+    }
     // TODO -> checking
     ui.layoutStack[ui.stackSize-1] = nil
 }

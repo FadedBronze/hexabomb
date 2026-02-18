@@ -120,12 +120,14 @@ GameMode :: enum {
     LandAhoy,
     Solo,
     Random,
+    EnergyRush,
 }
 
 gamemode_names := [GameMode]string{
     .LandAhoy = "land ahoy",
     .Solo = "solo",
     .Random = "random",
+    .EnergyRush = "rush",
 }
 
 GameStats :: struct {
@@ -226,7 +228,7 @@ active_tile_ui :: proc(game: ^Game, currentPlayerIndex: u8) {
 
     ui.add_layout(ui.FlexBox{
         direction = .Vertical,
-        corner = .TopRight,
+        corner = {.Top},
         gap = 5
     })
 
@@ -488,6 +490,8 @@ force_start_next_turn :: proc (game: ^Game) {
         update_solo_boss(game)
     }
 
+    game.stats.energyPerRound += 1
+
     for i in 0..<game.playerCount {
         player := &game.players[i]
         player.playerState = .Playing
@@ -557,7 +561,7 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
         ui.add_layout(ui.FlexBox{
             gap = 10,
             direction = .Horizontal,
-            corner = .TopLeft,
+            corner = {.Top, .Left},
         })
 
         for tile in TileType {
@@ -586,7 +590,7 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
     {
         ui.add_layout(ui.FlexBox {
             direction = .Horizontal,
-            corner = .BottomRight,
+            corner = {},
             gap = 10,
         })
 
@@ -618,7 +622,7 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
 
     {
         ui.add_layout(ui.FlexBox{ direction = .Horizontal,
-            corner = .BottomLeft,
+            corner = {.Left},
         })
 
         {
@@ -707,16 +711,12 @@ crown_winner :: proc(game: ^Game) {
         }
     }
 
-    fmt.println(lastPlayerCount, lastPlayerIdx)
-
     if lastPlayerCount == 1 {
         assert(lastPlayerIdx >= 0)
         game.winnerIdx = u8(lastPlayerIdx)
         game.state = .Winner
     }
 }
-
-import "core:fmt"
 
 FieldIterator :: struct {
     i: i16,
@@ -846,13 +846,20 @@ create_player_land :: proc(game: ^Game, id: u8, haldGridPos: HalfGridPosition) {
 game_selector :: proc(game: ^Game, player: ^Player) {
     hexagonSize: i32 = 30
 
-    ui.add_layout(ui.margin_xy(320, 170, relativity=.FromCenter))
-    ui.add_bounds()
-
     ui.add_layout(ui.FlexBox{
-        gap = 10
+        gap = 20,
+        corner = {.Left, .Top},
+        direction = .Vertical,
+        spacing = .Centered,
     })
 
+    ui.add_bounds({700, 200})
+    ui.add_layout(ui.FlexBox{
+        gap = 10,
+        corner = {.Left, .Top},
+        spacing = .Centered,
+    })
+    
     ui.add_bounds({150, 150})
     if (ui.button("mini", rl.GRAY)) {
         game.stats.energyPerRound = 3
@@ -960,23 +967,32 @@ game_selector :: proc(game: ^Game, player: ^Player) {
     ui.pop_bounds()
 
     ui.pop_layout()
-
     ui.pop_bounds()
-    ui.pop_layout()
 
-    ui.add_layout(ui.margin_xy(320, 380, relativity=.FromCenter))
-    ui.add_bounds()
-
+    ui.add_bounds({700, 100})
+    //ui.flat_color(rl.Color{ 0, 0, 0, 100 })
     ui.add_layout(ui.FlexBox{
         gap = 10,
         direction = .Horizontal,
-        corner = .BottomLeft,
+        corner = {},
+        spacing = .Centered,
     })
 
     for mode in GameMode {
+        buf: [16]u8
+        str := strings.unsafe_string_to_cstring(utils.concatenate(buf[:], gamemode_names[mode], "\x00")) 
+        text_size := f32(rl.MeasureText(str, 22))
+
+        ui.add_bounds({text_size + 40, 30})
+
+        ui.add_layout(ui.FlexBox{
+            gap = 10,
+            corner = {.Left, .Top},
+            direction = .Horizontal,
+        })
+
         ui.add_bounds({30, 30})
         selected := mode in game.stats.gameMode
-
         if ui.toggle(rl.PINK, rl.GRAY, selected, id=u64(mode)) {
             if selected {
                 game.stats.gameMode -= {mode}
@@ -986,14 +1002,17 @@ game_selector :: proc(game: ^Game, player: ^Player) {
         }
         ui.pop_bounds()
 
-        ui.add_bounds({90, 20})
+        ui.add_bounds({text_size, 30})
         ui.text_display(gamemode_names[mode], rl.BLACK)
+        ui.pop_bounds()
+
+        ui.pop_layout()
         ui.pop_bounds()
     }
   
     ui.pop_layout()
-
     ui.pop_bounds()
+    
     ui.pop_layout()
 
     rl.DrawCircle(i32(player.inputState.mousePos.x), i32(player.inputState.mousePos.y), 12, rl.BLACK)
@@ -1041,7 +1060,7 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
 
         ui.add_layout(ui.FlexBox{
             gap = 10,
-            corner = .TopLeft,
+            corner = {.Top, .Left},
             direction = .Horizontal,
         })
 
@@ -1389,6 +1408,7 @@ update_network_interface :: proc(app: ^App) {
         ui.add_layout(ui.FlexBox {
             gap = 10,
             direction = .Vertical,
+            corner = {.Left, .Top}
         })
 
         lobby_count := network.lobbyEntries.len
