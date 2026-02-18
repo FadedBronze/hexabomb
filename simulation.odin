@@ -8,7 +8,7 @@ import sm "core:container/small_array"
 Shot :: struct {
     position: la.Vector2f32,
     velocity: la.Vector2f32,
-    last_bounced: HalfGridPosition,
+    last_damaged: HalfGridPosition,
 }
 
 EntityType :: enum {
@@ -321,10 +321,10 @@ simulate_entities :: proc(game: ^Game, dt: f32) {
                 add_particle(game, &explosion, opts={position=entity.position})
             }
 
-            if shot.last_bounced == halfgridPos {
+            if shot.last_damaged == halfgridPos {
                 break;
             }
-
+            
             if tile.type == .Shield {
                 bounce_dir := directions[tile.direction]
 
@@ -333,11 +333,11 @@ simulate_entities :: proc(game: ^Game, dt: f32) {
 
                 shot.velocity = vel * CANNONBALL_SPEED
                 shot.position = get_screen_position(&game.tileGrid, halfgridPos)
-                shot.last_bounced = halfgridPos
-                
-                if tile.playerId != entity.playerIndex+1 {
-                    damage_tile(game, halfgridPos, entity.damage)
-                }
+            }
+            
+            if tile.playerId != entity.playerIndex+1 {
+                damage_tile(game, halfgridPos, entity.damage)
+                shot.last_damaged = halfgridPos
             }
         }
     }
