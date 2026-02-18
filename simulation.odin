@@ -334,10 +334,10 @@ simulate_entities :: proc(game: ^Game, dt: f32) {
                 shot.velocity = vel * CANNONBALL_SPEED
                 shot.position = get_screen_position(&game.tileGrid, halfgridPos)
             }
+            shot.last_damaged = halfgridPos
             
             if tile.playerId != entity.playerIndex+1 {
                 damage_tile(game, halfgridPos, entity.damage)
-                shot.last_damaged = halfgridPos
             }
         }
     }
@@ -386,12 +386,14 @@ damage_tile :: proc(game: ^Game, halfGridPos: HalfGridPosition, amount: u8) {
         return
     }
 
-    for direction in directions {
-        nexttotile := get_tile(&game.tileGrid, halfGridPos + direction)
+    if tile.type != .Free {
+        for direction in directions {
+            nexttotile := get_tile(&game.tileGrid, halfGridPos + direction)
 
-        if nexttotile.type == .Defense {
-            tile = nexttotile
-            break
+            if nexttotile.type == .Defense {
+                tile = nexttotile
+                break
+            }
         }
     }
 

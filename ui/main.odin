@@ -514,7 +514,6 @@ within_button :: proc(
 }
 
 text_display :: proc(
-    uiFrameInfo: ^FrameInfo, 
     text: string, 
     color: rl.Color, 
     text_size: i32 = BUTTON_FONT_SIZE, 
@@ -523,7 +522,7 @@ text_display :: proc(
 ) {
     rectangle := get_bounds()
 
-    if .Draw not_in uiFrameInfo.behaviour {
+    if .Draw not_in ui.frameInfo.behaviour {
         return
     }
 
@@ -579,14 +578,34 @@ flat_color :: proc(color: rl.Color, ui := default_ui) {
     rl.DrawRectangleRec(bounds.rect, color)
 }
 
-//slider :: proc(
-//    rectangle: rl.Rectangle, 
-//    text: string, 
-//    color: rl.Color, 
-//
-//    loc := #caller_location, 
-//    id: Uniquifier = 0, 
-//    ui := default_ui
-//) -> bool {
-//    
-//}
+toggle :: proc(
+    on_color: rl.Color, 
+    off_color: rl.Color, 
+
+    toggled: bool,
+
+    loc := #caller_location, 
+    id: Uniquifier = 0, 
+    ui := default_ui
+) -> bool {
+    bounds := get_bounds()
+
+    col := on_color / rl.Color { 2, 2, 2, 1 } + rl.Color{255, 255, 255, 0} / 2
+    col2 := off_color / rl.Color { 2, 2, 2, 1 } + rl.Color{255, 255, 255, 0} / 2
+
+    if toggled {
+        rl.DrawRectangleRec(bounds.rect, col)
+    } else {
+        rl.DrawRectangleRec(bounds.rect, col2)
+    }
+
+    within := within_bounds(bounds, ui.inputState.mousePos)
+ 
+    if within {
+        if .Draw in ui.frameInfo.behaviour {
+            rl.DrawRectangleLines(i32(bounds.x), i32(bounds.y), i32(bounds.width), i32(bounds.height), rl.BLACK)
+        }
+    }
+    
+    return within && is_left_button_pressed(ui.frameInfo) && .Update in ui.frameInfo.behaviour
+}

@@ -116,19 +116,21 @@ defaultBigTileTypeStats := [TileType]TileTypeStat{
     .Landmine     = {NA, NA, 2,  4,  0,  NA},
 }
 
-GameMode :: bit_set[enum {
+GameMode :: enum {
     LandAhoy,
     Solo,
-}]
+    Random,
+}
+
+gamemode_names := [GameMode]string{
+    .LandAhoy = "land ahoy",
+    .Solo = "solo",
+    .Random = "random",
+}
 
 GameStats :: struct {
     energyPerRound: u16,
-    gameMode: GameMode,
-}
-
-defaultGameStats := GameStats{
-    energyPerRound = 3,
-    gameMode = {.LandAhoy},
+    gameMode: bit_set[GameMode],
 }
 
 MAX_ENTITIES :: 32
@@ -620,7 +622,7 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
         {
             buf: [8]u8
             ui.add_bounds({ 20, 20 })
-            ui.text_display(player.uiFrameInfo, strconv.write_int(buf[:], i64(game.rounds), 10), rl.BLACK)
+            ui.text_display(strconv.write_int(buf[:], i64(game.rounds), 10), rl.BLACK)
             ui.pop_bounds()
         }
 
@@ -630,7 +632,7 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
             buf[len(str)] = 'e'
 
             ui.add_bounds({ 40, 20 })
-            ui.text_display(player.uiFrameInfo, cast(string)buf[:], rl.BLACK)
+            ui.text_display(cast(string)buf[:], rl.BLACK)
             ui.pop_bounds()
         }
 
@@ -642,7 +644,7 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
             buf[len(str)+1] = 'e'
 
             ui.add_bounds({ 40, 20 })
-            ui.text_display(player.uiFrameInfo, cast(string)buf[:], rl.RED)
+            ui.text_display(cast(string)buf[:], rl.RED)
             ui.pop_bounds()
         }
 
@@ -659,12 +661,12 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
 
             copy(buf[len(str):], "")
             ui.add_bounds({ 40, 20 })
-            ui.text_display(player.uiFrameInfo, cast(string)buf[:len(str)+5], rl.BLACK)
+            ui.text_display(cast(string)buf[:len(str)+5], rl.BLACK)
             ui.pop_bounds()
         }
 
         ui.add_bounds({20, 20})
-        ui.text_display(player.uiFrameInfo, player.username, player.color)
+        ui.text_display(player.username, player.color)
         ui.pop_bounds()
 
         ui.pop_layout()
@@ -847,7 +849,7 @@ game_selector :: proc(game: ^Game, player: ^Player) {
 
     ui.add_bounds({150, 150})
     if (ui.button("mini", rl.GRAY)) {
-        game.stats = defaultGameStats
+        game.stats.energyPerRound = 3
         game.tileTypeStats = defaultTileTypeStats
 
         game.tileGrid = TileGrid {
@@ -855,7 +857,11 @@ game_selector :: proc(game: ^Game, player: ^Player) {
             hexagonSize = hexagonSize,
         }
 
-        free_field(&game.tileGrid)
+        if .Random in game.stats.gameMode {
+            randomize_field(&game.tileGrid, game.map_random_context)
+        } else {
+            free_field(&game.tileGrid)
+        }
 
         create_player_land(game, 1, {2, 2})
         create_player_land(game, 2, {-2, -2})
@@ -868,7 +874,7 @@ game_selector :: proc(game: ^Game, player: ^Player) {
     if game.playerCount == 1 {
         ui.add_bounds({150, 150})
         if (ui.button("solo", rl.GRAY)) {
-            game.stats = defaultGameStats
+            game.stats.energyPerRound = 10
             game.tileTypeStats = defaultBigTileTypeStats
 
             game.tileGrid = TileGrid {
@@ -876,7 +882,11 @@ game_selector :: proc(game: ^Game, player: ^Player) {
                 hexagonSize = hexagonSize,
             }
 
-            randomize_field(&game.tileGrid, game.map_random_context)
+            if .Random in game.stats.gameMode {
+                randomize_field(&game.tileGrid, game.map_random_context)
+            } else {
+                free_field(&game.tileGrid)
+            }
 
             create_player_land(game, 1, {0, 0})
 
@@ -885,7 +895,6 @@ game_selector :: proc(game: ^Game, player: ^Player) {
             create_player_land(game, 2, {4, 0})
             create_player_land(game, 2, {-4, 0})
 
-            game.stats.energyPerRound = 10
             game.stats.gameMode += {.Solo}
 
             force_start_next_turn(game)
@@ -897,41 +906,23 @@ game_selector :: proc(game: ^Game, player: ^Player) {
     ui.add_bounds({150, 150})
     if (ui.button("mega", rl.GRAY)) {
         game.tileTypeStats = defaultBigTileTypeStats
-        game.stats = defaultGameStats
+        game.stats.energyPerRound = 10
 
         game.tileGrid = TileGrid {
             size = 9,
             hexagonSize = hexagonSize,
         }
 
-        randomize_field(&game.tileGrid, game.map_random_context)
+        if .Random in game.stats.gameMode {
+            randomize_field(&game.tileGrid, game.map_random_context)
+        } else {
+            free_field(&game.tileGrid)
+        }
 
         create_player_land(game, 1, {3, 3})
         create_player_land(game, 2, {-3, -3})
 
         game.stats.energyPerRound = 10
-        force_start_next_turn(game)
-        assign_tile_limits(game)
-    }
-    ui.pop_bounds()
-
-    ui.add_bounds({150, 150})
-    if (ui.button("fog of war", rl.GRAY)) {
-        game.tileTypeStats = defaultBigTileTypeStats
-        game.stats = defaultGameStats
-        game.stats.gameMode -= { .LandAhoy }
-
-        game.tileGrid = TileGrid {
-            size = 8,
-            hexagonSize = hexagonSize,
-        }
-
-        randomize_field(&game.tileGrid, game.map_random_context)
-
-        create_player_land(game, 1, {2, 2})
-        create_player_land(game, 2, {-2, -2})
-
-        game.stats.energyPerRound = 8
         force_start_next_turn(game)
         assign_tile_limits(game)
     }
@@ -940,14 +931,18 @@ game_selector :: proc(game: ^Game, player: ^Player) {
     ui.add_bounds({150, 150})
     if (ui.button("big", rl.GRAY)) {
         game.tileTypeStats = defaultBigTileTypeStats
-        game.stats = defaultGameStats
+        game.stats.energyPerRound = 8
 
         game.tileGrid = TileGrid {
             size = 8,
             hexagonSize = hexagonSize,
         }
 
-        free_field(&game.tileGrid)
+        if .Random in game.stats.gameMode {
+            randomize_field(&game.tileGrid, game.map_random_context)
+        } else {
+            free_field(&game.tileGrid)
+        }
 
         create_player_land(game, 1, {3, 3})
         create_player_land(game, 2, {-3, -3})
@@ -958,32 +953,38 @@ game_selector :: proc(game: ^Game, player: ^Player) {
     }
     ui.pop_bounds()
 
-    ui.add_bounds({150, 150})
-    if (ui.button("random", rl.GRAY)) {
-        game.tileTypeStats = defaultBigTileTypeStats
-        game.stats = defaultGameStats
+    ui.pop_layout()
 
-        game.tileGrid = TileGrid {
-            size = 8,
-            hexagonSize = hexagonSize,
+    ui.pop_bounds()
+    ui.pop_layout()
+
+    ui.add_layout(ui.margin_xy(320, 380, relativity=.FromCenter))
+    ui.add_bounds()
+
+    ui.add_layout(ui.FlexBox{
+        gap = 10,
+        direction = .Horizontal,
+        corner = .BottomLeft,
+    })
+
+    for mode in GameMode {
+        ui.add_bounds({30, 30})
+        selected := mode in game.stats.gameMode
+
+        if ui.toggle(rl.PINK, rl.GRAY, selected, id=u64(mode)) {
+            if selected {
+                game.stats.gameMode -= {mode}
+            } else {
+                game.stats.gameMode += {mode}
+            }
         }
+        ui.pop_bounds()
 
-        randomize_field(&game.tileGrid, game.map_random_context)
-
-        create_player_land(game, 1, {3, 3})
-        create_player_land(game, 2, {-3, -3})
-
-        force_start_next_turn(game)
-        assign_tile_limits(game)
+        ui.add_bounds({90, 20})
+        ui.text_display(gamemode_names[mode], rl.BLACK)
+        ui.pop_bounds()
     }
-    ui.pop_bounds()
-
-    ui.add_bounds({150, 150})
-    if (ui.button("+1", rl.GRAY)) {
-        game.seed += 1
-        rand.reset(game.seed)
-    }
-    ui.pop_bounds()
+  
     ui.pop_layout()
 
     ui.pop_bounds()
@@ -1126,7 +1127,6 @@ init_game :: proc(app: ^App) {
     }
 
     app.gameInstance.tileTypeStats = defaultTileTypeStats
-    app.gameInstance.stats = defaultGameStats
 
     for playerName, i in app.playerNames {
         player := &app.gameInstance.players[i]
