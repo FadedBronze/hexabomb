@@ -268,27 +268,6 @@ next_to_own_territory :: proc(game: ^Game, currentPlayerIndex: u8, halfGridPos: 
     return test_adjacent_cell(game, currentPlayerIndex, halfGridPos, own_territory)
 }
 
-place_tile_editor :: proc(game: ^Game, currentPlayerIndex: u8) {
-    player := &game.players[currentPlayerIndex]
-
-    if !ui.is_left_button_pressed(player.uiFrameInfo) {
-        return
-    }
-
-    within_bounds, halfgridPos := get_tile_grid_pos_safe(&game.tileGrid, player.inputState.mousePos)
-    
-    if !within_bounds {
-        return
-    }
-
-    tile := get_tile(&game.tileGrid, halfgridPos)
-    tile^ = create_tile(game, currentPlayerIndex+1, halfgridPos, player.selectedTileType)
-
-    if tile.type != .Blocked || tile.type != .Free {
-        tile.playerId = player.selectedPlayerIdx + 1
-    }
-}
-
 place_tile_game :: proc(game: ^Game, currentPlayerIndex: u8) {
     player := &game.players[currentPlayerIndex]
 
