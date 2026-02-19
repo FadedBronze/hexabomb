@@ -302,7 +302,7 @@ render_gameboard :: proc(game: ^Game, currentPlayerIndex: u8) {
 
         visibility := tile.visibility[currentPlayerIndex]
 
-        if .LandAhoy in game.stats.gameMode && visibility == .Invisible {
+        if .LandAhoy in game.modifiers && visibility == .Invisible {
             visibility = .LandVisible
         }
 
