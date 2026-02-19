@@ -547,7 +547,9 @@ active_id :: proc(ui := default_ui) -> ^UI_ID {
 
 flat_color :: proc(color: rl.Color, ui := default_ui) {
     bounds := get_bounds(ui)
-    rl.DrawRectangleRec(bounds.rect, color)
+    if .Draw in ui.behaviour {
+        rl.DrawRectangleRec(bounds.rect, color)
+    }
 }
 
 toggle :: proc(

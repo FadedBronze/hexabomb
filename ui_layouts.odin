@@ -607,8 +607,12 @@ active_tile_editor_ui :: proc(game: ^Game, currentPlayerIndex: u8) {
         ui.add_bounds({150, 50})
         if ui.button("next player", player.color) {
             tile.playerId += 1
+
             tile.playerId = (tile.playerId - 1) % MAX_PLAYERS + 1
             player.selectedPlayerIdx = tile.playerId - 1
+
+            tile.visibility = {}
+            tile.visibility[player.selectedPlayerIdx] = .VeryVisible
         }
         ui.pop_bounds()
     }
@@ -723,13 +727,13 @@ game_endscreen :: proc(game: ^Game, currentPlayerIndex: u8) {
     }
     ui.pop_bounds()
 
+    ui.add_bounds({100, 60})
     if !player.peeking {
-        ui.add_bounds({100, 60})
         if (ui.button("continue", player.color)) {
             game.state = .GameSelector
         }
-        ui.pop_bounds()
     }
+    ui.pop_bounds()
     
     ui.pop_layout()
 

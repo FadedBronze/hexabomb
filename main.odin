@@ -283,7 +283,10 @@ place_tile_editor :: proc(game: ^Game, currentPlayerIndex: u8) {
 
     tile := get_tile(&game.tileGrid, halfgridPos)
     tile^ = create_tile(game, currentPlayerIndex+1, halfgridPos, player.selectedTileType)
-    tile.playerId = player.selectedPlayerIdx + 1
+
+    if tile.type != .Blocked || tile.type != .Free {
+        tile.playerId = player.selectedPlayerIdx + 1
+    }
 }
 
 place_tile_game :: proc(game: ^Game, currentPlayerIndex: u8) {
