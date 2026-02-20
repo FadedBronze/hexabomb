@@ -5,46 +5,49 @@ import "core:strings"
 import rl "vendor:raylib"
 import "utils"
 import net "network"
-import "core:encoding/cbor"
-import "log"
-import "core:os"
+import la "core:math/linalg"
 import "core:math/rand"
 
-tile_names := [TileType]string{
-    .Blocked = "blocked",
-    .Cannon = "cannon",
-    .Land = "land",
-    .Free = "free",
-    .Shield = "shield",
-    .Nuke = "nuke",
-    .Mortar = "mortar",
-    .Telescope = "lookout",
-    .Defense = "defense",
-    .BridgeStart = "bridge",
-    .Landmine = "landmine",
-
-    .BridgeEnd = "",
-    .BlastTarget = "",
-    .MortarTarget = "",
+TileInfo :: struct{
+    name: string,
+    flags: bit_set[TileFlags],
 }
 
-TileAvailability :: enum {
+tile_info := [TileType]TileInfo{
+    .Blocked =      {"blocked",     {.Editor}},
+    .Free =         {"free",        {.Editor}},
+    .Land =         {"land",        {.Game, .Editor}},
+    .Cannon =       {"cannon",      {.Game, .Editor}},
+    .Shield =       {"shield",      {.Game, .Editor}},
+    .Nuke =         {"nuke",        {.Game, .Editor, .Placeholder}},
+    .Mortar =       {"mortar",      {.Game, .Editor}},
+    .Telescope =    {"lookout",     {.Game, .Editor}},
+    .Defense =      {"defense",     {.Game, .Editor}},
+    .BridgeStart =  {"bridge",      {.Game, .Editor}},
+    .Landmine =     {"landmine",    {.Game, .Editor}},
+    .BridgeEnd =    {"",            {}},
+    .BlastTarget =  {"",            {.Placeholder}},
+    .MortarTarget = {"",            {.Placeholder}},
+}
+
+TileFlags :: enum {
     Editor,
     Game,
+    Placeholder,
 }
 
-tile_availability := [TileType]bit_set[TileAvailability]{
+tile_availability := [TileType]bit_set[TileFlags]{
     .Blocked = {.Editor},
     .Free = {.Editor},
-    .Cannon = {.Game},
+    .Cannon = {.Game, .Editor},
     .Land = {.Game, .Editor},
-    .Shield = {.Game},
-    .Nuke = {.Game},
-    .Mortar = {.Game},
-    .Telescope = {.Game},
-    .Defense = {.Game},
-    .BridgeStart = {.Game},
-    .Landmine = {.Game},
+    .Shield = {.Game, .Editor},
+    .Nuke = {.Game, .Editor},
+    .Mortar = {.Game, .Editor},
+    .Telescope = {.Game, .Editor},
+    .Defense = {.Game, .Editor},
+    .BridgeStart = {.Game, .Editor},
+    .Landmine = {.Game, .Editor},
     .BlastTarget = {},
     .MortarTarget = {},
     .BridgeEnd = {},
@@ -64,18 +67,18 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
         })
 
         for tile in TileType {
-            if .Editor in game.modifiers {
-                if .Editor not_in tile_availability[tile] {
+            if .Editor in game.non_map_modifiers {
+                if .Editor not_in tile_info[tile].flags {
                     continue
                 }
             } else {
-                if .Game not_in tile_availability[tile] {
+                if .Game not_in tile_info[tile].flags {
                     continue
                 }
             }
 
             ui.add_bounds({80, 75})
-            if (ui.button(tile_names[tile], player.color, id=tile_names[tile])) {
+            if (ui.button(tile_info[tile].name, player.color, id=tile_info[tile].name)) {
                 //IDK yet play_audio("click.mp3")
                 player.editMode = .Placing
                 player.selectedTileType = tile
@@ -99,7 +102,7 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
             gap = 10,
         })
 
-        if (.Editor in game.modifiers) {
+        if (.Editor in game.non_map_modifiers) {
             ui.add_bounds({150, 75})
             if (ui.button("save", player.color)) {
                 buf: [16]u8
@@ -109,9 +112,7 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
                 }
 
                 game.mapName = transmute(string)buf[:]
-                if (save_map_data(game)) {
-                    fmt.println("success")
-                }
+                save_map_data(game)
                 game.mapName = ""
             }
             ui.pop_bounds()
@@ -205,31 +206,11 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
     ui.pop_layout()
 }
 
-game_selector :: proc(game: ^Game, player: ^Player) {
+game_selector_maps :: proc(game: ^Game, player: ^Player) {
+    button_bounds := la.Vector2f32{80, 80}
     hexagonSize: i32 = 30
-    
-    ui.add_layout(ui.FlexBox{
-        gap = 10,
-        corner = {.Left, .Top},
-        direction = .Horizontal,
-        spacing = .Centered,
-    })
-    ui.add_bounds({630, 1})
 
-    ui.add_layout(ui.FlexBox{
-        gap = 20,
-        corner = {.Left, .Top},
-        direction = .Vertical,
-        spacing = .Centered,
-    })
-
-    ui.add_bounds({1, 310})
-    ui.add_layout(ui.FlexBox{
-        gap = 10,
-        corner = {.Left, .Top},
-    })
-    
-    ui.add_bounds({150, 150})
+    ui.add_bounds(button_bounds)
     if (ui.button("mini", rl.GRAY)) {
         game.stats.energyPerRound = 3
         game.tileTypeStats = defaultTileTypeStats
@@ -239,14 +220,14 @@ game_selector :: proc(game: ^Game, player: ^Player) {
             hexagonSize = hexagonSize,
         }
 
-        if .Random in game.modifiers {
+        if .Random in game.map_modifiers {
             randomize_field(&game.tileGrid, game.map_random_context)
         } else {
             free_field(&game.tileGrid)
         }
 
-        create_player_land(game, 1, {2, 2})
-        create_player_land(game, 2, {-2, -2})
+        create_tile(game, 1, {2, 2})
+        create_tile(game, 2, {-2, -2})
 
         force_start_next_turn(game)
         assign_tile_limits(game)
@@ -254,7 +235,7 @@ game_selector :: proc(game: ^Game, player: ^Player) {
     ui.pop_bounds()
 
     if game.playerCount == 1 {
-        ui.add_bounds({150, 150})
+        ui.add_bounds(button_bounds)
         if (ui.button("solo", rl.GRAY)) {
             game.stats.energyPerRound = 10
             game.tileTypeStats = defaultBigTileTypeStats
@@ -264,20 +245,20 @@ game_selector :: proc(game: ^Game, player: ^Player) {
                 hexagonSize = hexagonSize,
             }
 
-            if .Random in game.modifiers {
+            if .Random in game.map_modifiers {
                 randomize_field(&game.tileGrid, game.map_random_context)
             } else {
                 free_field(&game.tileGrid)
             }
 
-            create_player_land(game, 1, {0, 0})
+            create_tile(game, 1, {0, 0})
 
-            create_player_land(game, 2, {0, 8})
-            create_player_land(game, 2, {0, -8})
-            create_player_land(game, 2, {4, 0})
-            create_player_land(game, 2, {-4, 0})
+            create_tile(game, 2, {0, 8})
+            create_tile(game, 2, {0, -8})
+            create_tile(game, 2, {4, 0})
+            create_tile(game, 2, {-4, 0})
 
-            game.modifiers += {.Solo}
+            game.map_modifiers += {.Solo}
 
             force_start_next_turn(game)
             assign_tile_limits(game)
@@ -285,7 +266,7 @@ game_selector :: proc(game: ^Game, player: ^Player) {
         ui.pop_bounds()
     }
 
-    ui.add_bounds({150, 150})
+    ui.add_bounds(button_bounds)
     if (ui.button("mega", rl.GRAY)) {
         game.tileTypeStats = defaultBigTileTypeStats
         game.stats.energyPerRound = 10
@@ -295,14 +276,14 @@ game_selector :: proc(game: ^Game, player: ^Player) {
             hexagonSize = hexagonSize,
         }
 
-        if .Random in game.modifiers {
+        if .Random in game.map_modifiers {
             randomize_field(&game.tileGrid, game.map_random_context)
         } else {
             free_field(&game.tileGrid)
         }
 
-        create_player_land(game, 1, {3, 3})
-        create_player_land(game, 2, {-3, -3})
+        create_tile(game, 1, {3, 3})
+        create_tile(game, 2, {-3, -3})
 
         game.stats.energyPerRound = 10
         force_start_next_turn(game)
@@ -310,7 +291,7 @@ game_selector :: proc(game: ^Game, player: ^Player) {
     }
     ui.pop_bounds()
     
-    ui.add_bounds({150, 150})
+    ui.add_bounds(button_bounds)
     if (ui.button("big", rl.GRAY)) {
         game.tileTypeStats = defaultBigTileTypeStats
         game.stats.energyPerRound = 8
@@ -320,14 +301,14 @@ game_selector :: proc(game: ^Game, player: ^Player) {
             hexagonSize = hexagonSize,
         }
 
-        if .Random in game.modifiers {
+        if .Random in game.map_modifiers {
             randomize_field(&game.tileGrid, game.map_random_context)
         } else {
             free_field(&game.tileGrid)
         }
 
-        create_player_land(game, 1, {3, 3})
-        create_player_land(game, 2, {-3, -3})
+        create_tile(game, 1, {3, 3})
+        create_tile(game, 2, {-3, -3})
 
         game.stats.energyPerRound = 10
         force_start_next_turn(game)
@@ -338,7 +319,7 @@ game_selector :: proc(game: ^Game, player: ^Player) {
     for &mapname in game.saved_map_names[:game.saved_map_count] {
         mapname := transmute(string)mapname[:]
 
-        ui.add_bounds({150, 150})
+        ui.add_bounds(button_bounds)
         if (ui.button(mapname, rl.GRAY)) {
             buf: [32]u8
             path := utils.concatenate(buf[:], "./maps/", mapname)
@@ -350,6 +331,45 @@ game_selector :: proc(game: ^Game, player: ^Player) {
         }
         ui.pop_bounds()
     }
+}
+
+game_selector :: proc(game: ^Game, player: ^Player) {
+    ui.flat_color(rl.Color{ 0, 0, 0, 20 })
+
+    ui.add_layout(ui.FlexBox{
+        gap = 10,
+        corner = {.Left, .Top},
+        direction = .Horizontal,
+        spacing = .Centered,
+    })
+
+    ui.add_bounds({0.8, 1})
+     
+    ui.add_layout(ui.FlexBox{
+        gap = 20,
+        corner = {.Left, .Top},
+        direction = .Vertical,
+        spacing = .Centered,
+    })
+
+    ui.add_bounds({0.1, 20})
+    ui.text_display("maps", rl.BLACK)
+    ui.pop_bounds()
+    
+    ui.add_bounds({1, 0.4})
+    ui.outline(rl.Color{ 0, 0, 0, 100 })
+    ui.add_layout(ui.margin(10))
+
+    ui.add_bounds({1, 1})
+    ui.add_layout(ui.FlexBox{
+        gap = 10,
+        corner = {.Left, .Top},
+    })
+    
+    game_selector_maps(game, player)
+    
+    ui.pop_layout()
+    ui.pop_bounds()
 
     ui.pop_layout()
     ui.pop_bounds()
@@ -362,36 +382,12 @@ game_selector :: proc(game: ^Game, player: ^Player) {
         spacing = .Linear,
     })
 
+    for mode in MapSpecficModifier {
+        render_modifier_toggle(&game.map_modifiers, map_modifiers, mode)
+    }
+    
     for mode in Modifier {
-        buf: [16]u8
-        str := strings.unsafe_string_to_cstring(utils.concatenate(buf[:], gamemode_names[mode], "\x00")) 
-        text_size := f32(rl.MeasureText(str, 22))
-
-        ui.add_bounds({text_size + 50, 30})
-
-        ui.add_layout(ui.FlexBox{
-            gap = 10,
-            corner = {.Left, .Top},
-            direction = .Horizontal,
-        })
-
-        ui.add_bounds({30, 30})
-        selected := mode in game.modifiers
-        if ui.toggle(rl.PINK, rl.GRAY, selected, id=u64(mode)) {
-            if selected {
-                game.modifiers -= {mode}
-            } else {
-                game.modifiers += {mode}
-            }
-        }
-        ui.pop_bounds()
-
-        ui.add_bounds({text_size, 30})
-        ui.text_display(gamemode_names[mode], rl.BLACK)
-        ui.pop_bounds()
-
-        ui.pop_layout()
-        ui.pop_bounds()
+        render_modifier_toggle(&game.non_map_modifiers, nonmap_modifiers, mode)
     }
   
     ui.pop_layout()
@@ -405,11 +401,42 @@ game_selector :: proc(game: ^Game, player: ^Player) {
     rl.DrawCircle(i32(player.inputState.mousePos.x), i32(player.inputState.mousePos.y), 12, rl.BLACK)
 }
 
+render_modifier_toggle :: proc(modifiers: ^bit_set[$T], names: [T]string, mode: T) {
+    buf: [32]u8
+    str := strings.unsafe_string_to_cstring(utils.concatenate(buf[:], names[mode], "\x00")) 
+    text_size := f32(rl.MeasureText(str, 22))
+
+    ui.add_bounds({text_size + 50, 30})
+
+    ui.add_layout(ui.FlexBox{
+        gap = 10,
+        corner = {.Left, .Top},
+        direction = .Horizontal,
+    })
+
+    ui.add_bounds({30, 30})
+    selected := mode in modifiers
+    if ui.toggle(rl.BLACK, rl.GRAY, selected, id=u64(mode)) {
+        if selected {
+            modifiers^ -= {mode}
+        } else {
+            modifiers^ += {mode}
+        }
+    }
+    ui.pop_bounds()
+
+    ui.add_bounds({text_size, 30})
+    ui.text_display(names[mode], rl.BLACK)
+    ui.pop_bounds()
+
+    ui.pop_layout()
+    ui.pop_bounds()
+}
+
 update_network_interface :: proc(app: ^App) { 
     network := &app.network
+    ui.flat_color(rl.Color{ 0, 0, 0, 20 })
     
-    ui.flat_color(rl.Color{ 0, 0, 0, 150 })
-
     switch network.state {
     case .Failed:
         ui.add_layout(ui.margin_xy(75, 75, relativity=.FromCenter))
@@ -627,4 +654,3 @@ game_endscreen :: proc(game: ^Game, currentPlayerIndex: u8) {
     ui.pop_bounds()
     ui.pop_layout()
 }
-import "core:fmt"

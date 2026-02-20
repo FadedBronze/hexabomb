@@ -1,7 +1,6 @@
 package main
 import "core:strconv"
 import rl "vendor:raylib"
-import la "core:math/linalg"
 import "core:strings"
 import "core:time"
 import "core:os"
@@ -11,7 +10,6 @@ import "core:math/rand"
 import "log"
 import net "network"
 import "ui"
-import "utils"
 
 import rn "base:runtime"
 
@@ -56,6 +54,16 @@ PlayerState :: enum {
     GotoLobby,
 }
 
+EditMode :: enum {
+    Placing,
+    Clicking,
+}
+
+DefaultTileStatsType :: enum {
+    Mini,
+    Big,
+}
+
 Player :: struct {
     tileLimits: [TileType]u8,
     playerState: PlayerState,
@@ -67,6 +75,8 @@ Player :: struct {
     username: string,
     activeTileId: u32,
     peeking: bool,
+    editorStatsOpen: bool,
+    selectedDefaultTileStats: DefaultTileStatsType,
     using uiFrameInfo: ^ui.FrameInfo,
 }
 
@@ -88,14 +98,14 @@ defaultTileTypeStats := [TileType]TileTypeStat{
     .Land         = {NA, NA, NA, 1,  0,  NA},
     .Cannon       = {NA, NA, NA, 1,  0,  NA},
     .Shield       = {NA, NA, NA, 0,  0,  NA},
-    .BlastTarget  = {NA, NA, 1, 1,  0,  NA},
+    .BlastTarget  = {NA, NA, 1,  1,  0,  NA},
     .Nuke         = {NA, NA, 1,  3,  0,  NA},
     .Mortar       = {1,  2,  1,  1,  0,  NA},
     .MortarTarget = {NA, NA, NA, 1,  0,  NA},
     .Telescope    = {NA, NA, NA, 1,  0,  NA},
     .Defense      = {2,  1,  NA, 2,  3,  NA},
     .BridgeStart  = {NA, NA, NA, 3,  NA, NA},
-    .BridgeEnd    = {NA, NA, NA, NA, NA, NA},
+    .BridgeEnd    = {NA, NA, NA, 0,  NA, NA},
     .Landmine     = {NA, NA, 2,  2,  0,  NA},
 }
 
@@ -105,31 +115,39 @@ defaultBigTileTypeStats := [TileType]TileTypeStat{
     .Land         = {NA, NA, NA, 1,  0,  NA},
     .Cannon       = {NA, NA, NA, 2,  0,  NA},
     .Shield       = {NA, NA, NA, 1,  0,  NA},
-    .BlastTarget  = {NA, NA, 1, 2,  0,  NA},
+    .BlastTarget  = {NA, NA, 1,  2,  0,  NA},
     .Nuke         = {NA, NA, 2,  8,  0,  NA},
     .Mortar       = {1,  4,  1,  2,  0,  NA},
     .MortarTarget = {NA, NA, NA, 2,  0,  NA},
     .Telescope    = {NA, NA, NA, 2,  0,  NA},
     .Defense      = {2,  2,  NA, 4,  3,  NA},
     .BridgeStart  = {NA, NA, NA, 3,  NA, NA},
-    .BridgeEnd    = {NA, NA, NA, NA, NA, NA},
+    .BridgeEnd    = {NA, NA, NA, 0,  NA, NA},
     .Landmine     = {NA, NA, 2,  4,  0,  NA},
 }
 
-Modifier :: enum {
+MapSpecficModifier :: enum {
     LandAhoy,
     Solo,
     Random,
     EnergyRush,
-    Editor,
 }
 
-gamemode_names := [Modifier]string{
+Modifier :: enum {
+    Editor,
+    OverrideModifiers,
+}
+
+map_modifiers := [MapSpecficModifier]string{
     .LandAhoy = "land ahoy",
     .Solo = "solo",
     .Random = "random",
     .EnergyRush = "rush",
+}
+
+nonmap_modifiers := [Modifier]string{
     .Editor = "editor",
+    .OverrideModifiers = "override",
 }
 
 GameStats :: struct {
@@ -144,6 +162,7 @@ MapState :: struct {
     tileTypeStats: [TileType]TileTypeStat,
     tileGrid: TileGrid,
     mapName: string,
+    map_modifiers: bit_set[MapSpecficModifier],
 }
 
 Game :: struct {
@@ -151,13 +170,13 @@ Game :: struct {
 
     // Map State
     using map_state: MapState,
+    
+    non_map_modifiers: bit_set[Modifier],
 
     // Transient State
     saved_map_names: [][16]u8,
     saved_map_count: u16,
     
-    modifiers: bit_set[Modifier],
-
     playerCount: u8,
     players: [MAX_PLAYERS]Player,
     winnerIdx: u8,
@@ -173,205 +192,6 @@ playerColors := [4]rl.Color {
     rl.RED,
     rl.GREEN,
     rl.ORANGE,
-}
-
-format_cost_and_scaling :: proc(game: ^Game, tileType: TileType, bufstr: []u8) -> string {
-    assert(len(bufstr)>=16)
-
-    scalingCost := game.tileTypeStats[tileType].scalingCost
-    scaling := game.tileTypeStats[tileType].scaling
-    buf: [4]u8
-    buf2: [4]u8
-
-    return utils.concatenate(bufstr[:], 
-        "+",
-        strconv.write_uint(buf[:], u64(scaling), 10), 
-        " for ", 
-        strconv.write_uint(buf2[:], u64(scalingCost), 10), 
-        "e"
-    )
-}
-
-click_tile :: proc(game: ^Game, currentPlayerIndex: u8) {
-    player := &game.players[currentPlayerIndex]
-
-    within_bounds, halfgrid := get_tile_grid_pos_safe(&game.tileGrid, player.inputState.mousePos)
-
-    if !within_bounds {
-        return
-    }
-
-    hovered_tile := get_tile(&game.tileGrid, halfgrid)
-
-    if hovered_tile.playerId == 0 {
-        return
-    }
-
-    if ui.is_left_button_pressed(player.uiFrameInfo) {
-        if rl.IsKeyDown(.LEFT_SHIFT) {
-            log.msg("debug", hovered_tile)
-        }
-
-        if hovered_tile.type == .Cannon && hovered_tile.playerId - 1 == currentPlayerIndex {
-            player.activeTileId = get_tile_id(halfgrid)
-
-            player.editMode = .Placing
-            player.selectedTileType = .BlastTarget
-        }
-
-        player.activeTileId = get_tile_id(halfgrid)
-    }
-}
-
-EditMode :: enum {
-    Placing,
-    Clicking,
-}
-
-render_number :: proc(spos: la.Vector2f32, number: u8) {
-    buf: [2]u8
-    buf[0] = number + '0'
-    buf[1] = 0
-
-    str: cstring = transmute(cstring)&buf
-
-    width := rl.MeasureText(str, 20)
-    rl.DrawText(str, i32(spos.x) - width / 2, i32(spos.y) - 20 / 2, 20, rl.BLACK)
-}
-
-pay_active_tile_cost :: proc(game: ^Game, player: ^Player) -> bool {
-    req_energy := game.tileTypeStats[player.selectedTileType].cost
-
-    if player.tileLimits[player.selectedTileType] == 0 {
-        return false
-    }
-
-    if u16(req_energy) > player.energy {
-        return false
-    }
-
-    player.energy -= u16(req_energy)
-
-    if player.tileLimits[player.selectedTileType] != NA {
-        player.tileLimits[player.selectedTileType] -= 1
-    }
-
-    return true
-}
-
-next_to_own_territory :: proc(game: ^Game, currentPlayerIndex: u8, halfGridPos: HalfGridPosition) -> bool {
-    own_territory :: proc(game: ^Game, currentPlayerIndex: u8, tile: ^Tile) -> bool {
-        player := &game.players[currentPlayerIndex]
-        return tile.playerId - 1 == currentPlayerIndex && tile.type != .Blocked && tile.type != .Free
-    }
-
-    return test_adjacent_cell(game, currentPlayerIndex, halfGridPos, own_territory)
-}
-
-place_tile_game :: proc(game: ^Game, currentPlayerIndex: u8) {
-    player := &game.players[currentPlayerIndex]
-
-    if !ui.is_left_button_pressed(player.uiFrameInfo) {
-        return
-    }
-
-    within_bounds, halfgridPos := get_tile_grid_pos_safe(&game.tileGrid, player.inputState.mousePos)
-
-    if !within_bounds {
-        return
-    }
-
-    tile := get_tile(&game.tileGrid, halfgridPos)
-
-    if tile.type == .Blocked {
-        return
-    }
-
-    activeTile, activeTileHalfgridPos := get_active_tile(&game.tileGrid, player)
-    nextToActiveTile, dir := next_to(halfgridPos, activeTileHalfgridPos)
-
-    switch player.selectedTileType {
-    case .BridgeStart:
-        if next_to_own_territory(game, currentPlayerIndex, halfgridPos) && pay_active_tile_cost(game, player) {
-            create_player_land(game, currentPlayerIndex+1, halfgridPos)
-            get_tile(&game.tileGrid, halfgridPos).type = .BridgeStart
-            player.selectedTileType = .BridgeEnd
-        }
-    case .BridgeEnd:
-        valid := false
-
-        for direction in directions {
-            for i in 0..<4 {
-                tile := get_tile(&game.tileGrid, halfgridPos + direction * i16(i))
-                if tile.type == .BridgeStart {
-                    tile.type = .Land
-                    valid = true
-                }
-            }
-        }
-
-        if valid {
-            create_player_land(game, currentPlayerIndex+1, halfgridPos)
-        }
-    case .Nuke:
-        if pay_active_tile_cost(game, player) {
-            add_entity(game, currentPlayerIndex, halfgridPos, SimulationEntity {
-                damage = game.tileTypeStats[.BlastTarget].cost
-            }, EntityType.Nuke)
-            
-            add_particle(game, &explosion, opts={halfgridPos})
-        }
-    case .MortarTarget:
-        if pay_active_tile_cost(game, player) {
-            add_entity(game, currentPlayerIndex, halfgridPos, SimulationEntity {
-                damage = activeTile.damage
-            }, EntityType.MortarShot)
-
-            add_particle(game, &explosion, opts={halfgridPos})
-
-            player.activeTileId = 0
-            player.editMode = .Clicking
-        }
-    case .BlastTarget:
-        if nextToActiveTile && pay_active_tile_cost(game, player) {
-            add_cannonball(game, activeTileHalfgridPos, halfgridPos, currentPlayerIndex, dir)
-
-            player.activeTileId = 0
-            player.editMode = .Clicking
-        }
-    case .Land:
-        if tile.type != .Land && next_to_own_territory(game, currentPlayerIndex, halfgridPos) && pay_active_tile_cost(game, player) {
-            create_player_land(game, currentPlayerIndex+1, halfgridPos)
-        }
-    case .Cannon, .Mortar, .Shield, .Defense, .Landmine, .Telescope:
-        if tile.type == .Land && tile.playerId == currentPlayerIndex+1 && pay_active_tile_cost(game, player) {
-            tile.visibility[currentPlayerIndex] = .VeryVisible
-            tile.playerId = currentPlayerIndex + 1
-            tile.type = player.selectedTileType
-            tile.createdRound = u8(game.rounds)
-            tile.durability = game.tileTypeStats[tile.type].durability
-
-            #partial switch player.selectedTileType {
-            case .Telescope:
-                for dir in directions {
-                    pos := halfgridPos
-
-                    for within_game_bounds(game, pos) {
-                        pos += dir
-
-                        get_tile(&game.tileGrid, pos).visibility[currentPlayerIndex] = .VeryVisible
-                    }
-                }
-            case .Mortar:
-                tile.damage = game.tileTypeStats[.Mortar].damage
-            case .Cannon, .Shield, .Defense, .Landmine:
-            case:
-                unreachable()
-            }
-        }
-    case .Blocked, .Free:
-        unreachable()
-    }
 }
 
 randomDirection :: proc() -> HexDirection {
@@ -427,11 +247,11 @@ update_solo_boss :: proc (game: ^Game) {
 force_start_next_turn :: proc (game: ^Game) {
     crown_winner(game)
 
-    if .Solo in game.modifiers {
+    if .Solo in game.map_modifiers {
         update_solo_boss(game)
     }
 
-    if .EnergyRush in game.modifiers {
+    if .EnergyRush in game.map_modifiers {
         game.stats.energyPerRound += 1
     }
 
@@ -513,137 +333,6 @@ crown_winner :: proc(game: ^Game) {
     }
 }
 
-FieldIterator :: struct {
-    i: i16,
-    j: i16,
-}
-
-iterate_field :: proc(iter: ^FieldIterator, tileGrid: ^TileGrid) -> ^Tile {
-    for {
-        iter.j += 1
-        if iter.j >= MAX_GRID_SIZE {
-            iter.i += 1
-            iter.j = 0
-        }
-
-        if iter.i >= MAX_GRID_SIZE {
-            return nil
-        }
-
-        x := iter.j - HALF_MAX_GRID_SIZE
-        y := iter.i - HALF_MAX_GRID_SIZE
-
-        if abs(x) % 2 != abs(y) % 2 {
-            continue;
-        }
-
-        if within_halfgrid_range(tileGrid.size, {x, y}) {
-            return get_tile(tileGrid, {x, y})
-        }
-    }
-}
-
-get_position :: proc(iter: ^FieldIterator) -> HalfGridPosition {
-    x := iter.j - HALF_MAX_GRID_SIZE
-    y := iter.i - HALF_MAX_GRID_SIZE
-    return {x, y}
-}
-
-random_tile_type :: proc(randomSelection: []struct{
-    tile: TileType,
-    chanceRatio: u8,
-}, generator: rn.Random_Generator) -> (type: TileType) {
-    totalRatio: u8 = 0
-
-    for selection in randomSelection {
-        totalRatio += selection.chanceRatio
-    }
-
-    roll := u8(rand.float32(gen = generator) * f32(totalRatio))
-
-    i := u8(0)
-    for selection in randomSelection {
-        if roll >= i && roll < i + selection.chanceRatio {
-            type = selection.tile
-            break;
-        }
-
-        i += selection.chanceRatio
-    }
-
-    return type
-}
-
-randomize_field :: proc(tileGrid: ^TileGrid, generator: rn.Random_Generator) {
-    fieldIterator: FieldIterator
-    for {
-        if tile := iterate_field(&fieldIterator, tileGrid); tile != nil {
-            tile.type = random_tile_type({
-                {tile = .Free, chanceRatio = 2},
-                {tile = .Blocked, chanceRatio = 1}
-                }, generator)
-        } else {
-            return
-        }
-    }
-}
-
-free_field :: proc(tileGrid: ^TileGrid) {
-    fieldIterator: FieldIterator
-    for {
-        if tile := iterate_field(&fieldIterator, tileGrid); tile != nil {
-            tile.type = .Free
-        } else {
-            return
-        }
-    }
-}
-
-create_tile :: proc(game: ^Game, playerId: u8, halfGridPos: HalfGridPosition, type: TileType) -> (tile: Tile) {
-    tile = Tile {
-        playerId = playerId,
-        type = type,
-        createdRound = u8(game.rounds),
-        durability = game.tileTypeStats[type].durability,
-        visibility = {},
-    }
-    tile.visibility[playerId-1] = .VeryVisible
-    return tile
-}
-
-create_player_land :: proc(game: ^Game, id: u8, haldGridPos: HalfGridPosition) {
-    tile := get_tile(&game.tileGrid, haldGridPos)
-
-    tile^ = create_tile(game, id, haldGridPos, .Land)
-
-    if id != 0 {
-        tile.visibility[id-1] = .VeryVisible
-    }
-
-    for dir in directions {
-        for i in 1..<i16(3) {
-            pos := haldGridPos + dir * i
-            nextTile := get_tile(&game.tileGrid, pos)
-
-            if nextTile.playerId != 0 {
-                their_visibility := &tile.visibility[nextTile.playerId-1]
-
-                if within_game_bounds(game, pos) && their_visibility^ < .LandVisible {
-                    their_visibility^ = .LandVisible
-                }
-            }
-
-            if id != 0 {
-                visibility := &nextTile.visibility[id - 1]
-
-                if within_game_bounds(game, pos) && visibility^ < .LandVisible {
-                    visibility^ = .LandVisible
-                }
-            }
-        }
-    }
-}
-
 update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
     player := &game.players[currentPlayerIndex]
 
@@ -682,7 +371,7 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
         switch player.editMode {
         case .Placing:
             if .Update in player.behaviour {
-                if .Editor in game.modifiers {
+                if .Editor in game.non_map_modifiers {
                     place_tile_editor(game, currentPlayerIndex)
                 } else {
                     place_tile_game(game, currentPlayerIndex)
@@ -693,13 +382,15 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
                 click_tile(game, currentPlayerIndex)
             }
 
-            if .Editor in game.modifiers {
-                active_tile_editor_ui(game, currentPlayerIndex)
-            } else {
+            if .Editor not_in game.non_map_modifiers {
                 active_tile_game_ui(game, currentPlayerIndex)
             }
         }
 
+        if .Editor in game.non_map_modifiers {
+            editor_side_ui(game, currentPlayerIndex)
+        }
+        edit_map_stats_ui(game, currentPlayerIndex)
         ui_layout(game, currentPlayerIndex)
         hover_tilegrid(&game.tileGrid, player)
     }

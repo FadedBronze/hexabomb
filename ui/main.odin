@@ -409,6 +409,7 @@ is_left_button_pressed :: proc(frameInfo: ^FrameInfo) -> bool {
 button :: proc(
     text: string, 
     color: rl.Color, 
+    size := BUTTON_FONT_SIZE,
     loc := #caller_location, 
     id: Uniquifier = 0, 
     ui := default_ui
@@ -416,6 +417,7 @@ button :: proc(
     return within_button(
         text, 
         color, 
+        size,
         id = id, 
         loc = loc, 
         ui = ui
@@ -430,6 +432,7 @@ get_bounds :: proc(ui := default_ui) -> Bounds {
 within_button :: proc(
     text: string, 
     color: rl.Color, 
+    size := BUTTON_FONT_SIZE,
     loc := #caller_location, 
     id: Uniquifier = 0, 
     ui := default_ui
@@ -476,10 +479,10 @@ within_button :: proc(
     buf: [64]u8
     str := strings.unsafe_string_to_cstring(utils.concatenate(buf[:], text, "\x00"))
 
-    text_width := rl.MeasureText(str, BUTTON_FONT_SIZE)
+    text_width := rl.MeasureText(str, i32(size))
 
     if .Draw in ui.frameInfo.behaviour {
-        rl.DrawText(str, i32(bounds.x + bounds.width/2) - i32(text_width)/2, i32(bounds.y + bounds.height/2) - BUTTON_FONT_SIZE/2, BUTTON_FONT_SIZE, rl.BLACK)
+        rl.DrawText(str, i32(bounds.x + bounds.width/2) - i32(text_width)/2, i32(bounds.y + bounds.height/2) - i32(size)/2, i32(size), rl.BLACK)
     }
 
     return within_button && .Update in ui.frameInfo.behaviour
@@ -543,6 +546,13 @@ generate_random_input :: proc(screenSize: [2]f32) -> InputState {
 
 active_id :: proc(ui := default_ui) -> ^UI_ID {
     return &ui.activeId
+}
+
+outline :: proc(color: rl.Color, ui := default_ui) {
+    bounds := get_bounds(ui)
+    if .Draw in ui.behaviour {
+        rl.DrawRectangleLines(i32(bounds.x), i32(bounds.y), i32(bounds.width), i32(bounds.height), rl.BLACK)
+    }
 }
 
 flat_color :: proc(color: rl.Color, ui := default_ui) {

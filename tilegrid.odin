@@ -4,6 +4,8 @@ import rl "vendor:raylib"
 import la "core:math/linalg"
 import "ui"
 import sm "core:container/small_array"
+import rn "base:runtime"
+import "core:math/rand"
 
 MAX_GRID_SIZE :: 32 
 HALF_MAX_GRID_SIZE :: MAX_GRID_SIZE / 2
@@ -302,7 +304,7 @@ render_gameboard :: proc(game: ^Game, currentPlayerIndex: u8) {
 
         visibility := tile.visibility[currentPlayerIndex]
 
-        if .LandAhoy in game.modifiers && visibility == .Invisible {
+        if .LandAhoy in game.map_modifiers && visibility == .Invisible {
             visibility = .LandVisible
         }
 
@@ -398,4 +400,101 @@ render_gameboard :: proc(game: ^Game, currentPlayerIndex: u8) {
 
 within_game_bounds :: proc(game: ^Game, halfgridPos: HalfGridPosition) -> bool {
     return within_halfgrid_range(game.tileGrid.size, halfgridPos)
+}
+
+FieldIterator :: struct {
+    i: i16,
+    j: i16,
+}
+
+iterate_field :: proc(iter: ^FieldIterator, tileGrid: ^TileGrid) -> ^Tile {
+    for {
+        iter.j += 1
+        if iter.j >= MAX_GRID_SIZE {
+            iter.i += 1
+            iter.j = 0
+        }
+
+        if iter.i >= MAX_GRID_SIZE {
+            return nil
+        }
+
+        x := iter.j - HALF_MAX_GRID_SIZE
+        y := iter.i - HALF_MAX_GRID_SIZE
+
+        if abs(x) % 2 != abs(y) % 2 {
+            continue;
+        }
+
+        if within_halfgrid_range(tileGrid.size, {x, y}) {
+            return get_tile(tileGrid, {x, y})
+        }
+    }
+}
+
+get_position :: proc(iter: ^FieldIterator) -> HalfGridPosition {
+    x := iter.j - HALF_MAX_GRID_SIZE
+    y := iter.i - HALF_MAX_GRID_SIZE
+    return {x, y}
+}
+
+random_tile_type :: proc(randomSelection: []struct{
+    tile: TileType,
+    chanceRatio: u8,
+}, generator: rn.Random_Generator) -> (type: TileType) {
+    totalRatio: u8 = 0
+
+    for selection in randomSelection {
+        totalRatio += selection.chanceRatio
+    }
+
+    roll := u8(rand.float32(gen = generator) * f32(totalRatio))
+
+    i := u8(0)
+    for selection in randomSelection {
+        if roll >= i && roll < i + selection.chanceRatio {
+            type = selection.tile
+            break;
+        }
+
+        i += selection.chanceRatio
+    }
+
+    return type
+}
+
+randomize_field :: proc(tileGrid: ^TileGrid, generator: rn.Random_Generator) {
+    fieldIterator: FieldIterator
+    for {
+        if tile := iterate_field(&fieldIterator, tileGrid); tile != nil {
+            tile.type = random_tile_type({
+                {tile = .Free, chanceRatio = 2},
+                {tile = .Blocked, chanceRatio = 1}
+                }, generator)
+        } else {
+            return
+        }
+    }
+}
+
+free_field :: proc(tileGrid: ^TileGrid) {
+    fieldIterator: FieldIterator
+    for {
+        if tile := iterate_field(&fieldIterator, tileGrid); tile != nil {
+            tile.type = .Free
+        } else {
+            return
+        }
+    }
+}
+
+render_number :: proc(spos: la.Vector2f32, number: u8) {
+    buf: [2]u8
+    buf[0] = number + '0'
+    buf[1] = 0
+
+    str: cstring = transmute(cstring)&buf
+
+    width := rl.MeasureText(str, 20)
+    rl.DrawText(str, i32(spos.x) - width / 2, i32(spos.y) - 20 / 2, 20, rl.BLACK)
 }
