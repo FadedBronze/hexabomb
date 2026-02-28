@@ -222,11 +222,11 @@ hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player, loc := #caller_loca
     }
 
     halfgrid := get_tile_grid_pos(tileGrid, player.inputState.mousePos)
-
+    
     if player.editMode == .Clicking {
         if player.activeTileId != 0 {
             return
-        }
+        }    
 
         fill_hexagon_halfgrid(halfgrid, tileGrid.offset, rl.Color{255, 255, 255, 50}, tileGrid.hexagonSize)
         return;
@@ -306,6 +306,10 @@ render_gameboard :: proc(game: ^Game, currentPlayerIndex: u8) {
 
         if .LandAhoy in game.map_modifiers && visibility == .Invisible {
             visibility = .LandVisible
+        }
+
+        if .Editor in game.non_map_modifiers {
+            visibility = .VeryVisible
         }
 
         if visibility == .Invisible {
@@ -388,7 +392,7 @@ render_gameboard :: proc(game: ^Game, currentPlayerIndex: u8) {
 
             entity := sm.get_ptr(&game.entities, int(entityId-1))
 
-            if entity.playerIndex == currentPlayerIndex {
+            if entity.playerIndex == currentPlayerIndex || .Editor in game.non_map_modifiers {
                 spos := get_screen_position(&game.tileGrid, pos)
                 rl.DrawCircle(i32(spos.x), i32(spos.y), 20, rl.Color{255, 0, 0, 125})
                 rl.DrawCircle(i32(spos.x), i32(spos.y), 10, rl.Color{255, 255, 255, 125})

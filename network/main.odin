@@ -569,8 +569,6 @@ broadcast_input_state :: proc(network: ^Network($I)) -> bool {
         broadcast_packet(network, &packet, network.lobby.clients[i].endpoint)
     }
 
-    log.msg("debug", firstInput.frameNumber)
-    
     if u8(sentCount) == network.lobby.clientCount-1 {
         queue.pop_front(&network.inputQueue)
     }    

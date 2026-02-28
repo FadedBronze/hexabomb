@@ -82,6 +82,7 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
                 //IDK yet play_audio("click.mp3")
                 player.editMode = .Placing
                 player.selectedTileType = tile
+                player.activeTileId = 0
             }
             ui.pop_bounds()
         }
@@ -226,8 +227,8 @@ game_selector_maps :: proc(game: ^Game, player: ^Player) {
             free_field(&game.tileGrid)
         }
 
-        create_tile(game, 1, {2, 2})
-        create_tile(game, 2, {-2, -2})
+        create_tile(game, 1, 1, {2, 2})
+        create_tile(game, 2, 2, {-2, -2})
 
         force_start_next_turn(game)
         assign_tile_limits(game)
@@ -251,12 +252,12 @@ game_selector_maps :: proc(game: ^Game, player: ^Player) {
                 free_field(&game.tileGrid)
             }
 
-            create_tile(game, 1, {0, 0})
+            create_tile(game, 1, 1, {0, 0})
 
-            create_tile(game, 2, {0, 8})
-            create_tile(game, 2, {0, -8})
-            create_tile(game, 2, {4, 0})
-            create_tile(game, 2, {-4, 0})
+            create_tile(game, 2, 2, {0, 8})
+            create_tile(game, 2, 2, {0, -8})
+            create_tile(game, 2, 2, {4, 0})
+            create_tile(game, 2, 2, {-4, 0})
 
             game.map_modifiers += {.Solo}
 
@@ -282,8 +283,8 @@ game_selector_maps :: proc(game: ^Game, player: ^Player) {
             free_field(&game.tileGrid)
         }
 
-        create_tile(game, 1, {3, 3})
-        create_tile(game, 2, {-3, -3})
+        create_tile(game, 1, 1, {3, 3})
+        create_tile(game, 2, 2, {-3, -3})
 
         game.stats.energyPerRound = 10
         force_start_next_turn(game)
@@ -307,8 +308,8 @@ game_selector_maps :: proc(game: ^Game, player: ^Player) {
             free_field(&game.tileGrid)
         }
 
-        create_tile(game, 1, {3, 3})
-        create_tile(game, 2, {-3, -3})
+        create_tile(game, 1, 1, {3, 3})
+        create_tile(game, 2, 2, {-3, -3})
 
         game.stats.energyPerRound = 10
         force_start_next_turn(game)
@@ -551,6 +552,21 @@ active_tile_game_ui :: proc(game: ^Game, currentPlayerIndex: u8) {
         corner = {.Top},
         gap = 5
     })
+    
+    if tile != nil && .Editor in game.non_map_modifiers {
+        buf: [32]u8
+
+        ui.add_bounds({150, 50})
+        if ui.button("next player", player.color) {
+            player.selectedPlayerIdx += 1
+            player.selectedPlayerIdx %= MAX_PLAYERS
+
+            tile.playerId = player.selectedPlayerIdx+1
+            tile.visibility = {}
+            tile.visibility[player.selectedPlayerIdx] = .VeryVisible
+        }
+        ui.pop_bounds()
+    }
 
     if tile != nil && tile.type == .Mortar {
         buf: [32]u8

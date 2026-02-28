@@ -9,12 +9,13 @@ import utils "../utils"
 FileLogger :: struct {
     handles: map[string]os.Handle,
     directory: string,
+    stdout: bool,
 }
 
 @(private="file")
 _logger: FileLogger
 
-init :: proc(directory: string) {
+init :: proc(directory: string, stdout := false) {
     buf: [64]u8
     path := utils.concatenate(buf[:], "./logs/", directory, "/")
     err := os.make_directory(path, os.O_CREATE)
@@ -24,6 +25,7 @@ init :: proc(directory: string) {
         assert(false)
     }
 
+    _logger.stdout = stdout
     _logger.directory = directory
     _logger.handles = make(map[string]os.Handle)
 }
@@ -72,13 +74,18 @@ msg :: proc(file: string, data: ..any, loc := #caller_location) {
     buffer: [256]u8
     sb := strings.builder_from_slice(buffer[:])
 
+    str := fmt.sbprintln(&sb, "[", t, "](", loc, ") ", data, sep = "")
+
+    if _logger.stdout {
+        fmt.println(str)
+    }
+
     ok, handle := _get_handle(file)
 
     if !ok {
         assert(false)
     }
 
-    str := fmt.sbprintln(&sb, "[", t, "](", loc, ") ", data, sep = "")
     _, err := os.write_string(handle, str)
 
     switch err {

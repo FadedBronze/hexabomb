@@ -170,7 +170,6 @@ Game :: struct {
 
     // Map State
     using map_state: MapState,
-    
     non_map_modifiers: bit_set[Modifier],
 
     // Transient State
@@ -379,17 +378,20 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
             }
         case .Clicking:
             if .Update in player.behaviour {
-                click_tile(game, currentPlayerIndex)
+                if .Editor not_in game.non_map_modifiers {
+                    click_tile(game, currentPlayerIndex, currentPlayerIndex+1)
+                } else {
+                    click_tile(game, currentPlayerIndex, player.selectedPlayerIdx+1)
+                }
             }
 
-            if .Editor not_in game.non_map_modifiers {
-                active_tile_game_ui(game, currentPlayerIndex)
-            }
+            active_tile_game_ui(game, currentPlayerIndex)
         }
 
         if .Editor in game.non_map_modifiers {
             editor_side_ui(game, currentPlayerIndex)
         }
+
         edit_map_stats_ui(game, currentPlayerIndex)
         ui_layout(game, currentPlayerIndex)
         hover_tilegrid(&game.tileGrid, player)
@@ -451,7 +453,7 @@ init_game :: proc(app: ^App) {
 }
 
 init_logs :: proc(app: ^App, clientName: string, clearlogs: bool) {
-    log.init(clientName)
+    log.init(clientName, true)
 
     if !clearlogs {
         log.msg("debug", "New Session")
@@ -510,7 +512,6 @@ init_app :: proc(app: ^App, cliArgs: ^CLIArgs) {
         net.create_local_lobby(&app.network, "my lobby")
     }    
 
-    ui.init(&app.ui)
     rl.InitAudioDevice()
     init_audio("./sfx/", &app.audio)
 
@@ -539,7 +540,7 @@ update_app :: proc(app: ^App, dt: f32) {
         app.currentClientInputState = ui.generate_random_input({920, 800})
     }
     
-    ui.begin_ui({ 
+    ui.begin_ui(&app.ui, { 
         width = f32(rl.GetScreenWidth()), 
         height = f32(rl.GetScreenHeight()) 
     })

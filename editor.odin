@@ -42,22 +42,6 @@ editor_side_ui :: proc(game: ^Game, currentPlayerIndex: u8) {
         }
     }
 
-    if tile != nil && tile.type == .Land {
-        buf: [32]u8
-
-        ui.add_bounds({150, 50})
-        if ui.button("next player", player.color) {
-            tile.playerId += 1
-
-            tile.playerId = (tile.playerId - 1) % MAX_PLAYERS + 1
-            player.selectedPlayerIdx = tile.playerId - 1
-
-            tile.visibility = {}
-            tile.visibility[player.selectedPlayerIdx] = .VeryVisible
-        }
-        ui.pop_bounds()
-    }
-    
     ui.pop_layout()
 
     ui.pop_bounds()
@@ -333,7 +317,7 @@ place_tile_editor :: proc(game: ^Game, currentPlayerIndex: u8) {
         return
     }
 
-    create_tile(game, currentPlayerIndex+1, halfgridPos)
+    create_tile(game, currentPlayerIndex, player.selectedPlayerIdx+1, halfgridPos)
 }
 
 can_place_tile :: proc(game: ^Game, currentPlayerIndex: u8, editor := false) -> bool {
@@ -429,8 +413,8 @@ reveal_land :: proc(game: ^Game, playerId: u8, halfGridPos: HalfGridPosition) {
     }
 }
 
-create_tile :: proc(game: ^Game, playerId: u8, halfGridPos: HalfGridPosition) {
-    player := &game.players[playerId-1]
+create_tile :: proc(game: ^Game, editingPlayerIdx: u8, playerId: u8, halfGridPos: HalfGridPosition) {
+    player := &game.players[editingPlayerIdx]
     type := player.selectedTileType
     
     activeTile, activeTileHalfgridPos := get_active_tile(&game.tileGrid, player)
@@ -512,7 +496,7 @@ place_tile_game :: proc(game: ^Game, currentPlayerIndex: u8) {
 
     _, halfgridPos := get_tile_grid_pos_safe(&game.tileGrid, player.inputState.mousePos)
 
-    create_tile(game, currentPlayerIndex+1, halfgridPos)
+    create_tile(game, currentPlayerIndex, currentPlayerIndex+1, halfgridPos)
 }
 
 format_cost_and_scaling :: proc(game: ^Game, tileType: TileType, bufstr: []u8) -> string {
@@ -532,8 +516,8 @@ format_cost_and_scaling :: proc(game: ^Game, tileType: TileType, bufstr: []u8) -
     )
 }
 
-click_tile :: proc(game: ^Game, currentPlayerIndex: u8) {
-    player := &game.players[currentPlayerIndex]
+click_tile :: proc(game: ^Game, editingPlayerIndex: u8, playerId: u8) {
+    player := &game.players[editingPlayerIndex]
 
     within_bounds, halfgrid := get_tile_grid_pos_safe(&game.tileGrid, player.inputState.mousePos)
 
@@ -552,7 +536,10 @@ click_tile :: proc(game: ^Game, currentPlayerIndex: u8) {
             log.msg("debug", hovered_tile)
         }
 
-        if hovered_tile.type == .Cannon && hovered_tile.playerId - 1 == currentPlayerIndex {
+        log.msg("debug", playerId, hovered_tile.playerId)
+        
+        if hovered_tile.type == .Cannon && hovered_tile.playerId == playerId {
+
             player.activeTileId = get_tile_id(halfgrid)
 
             player.editMode = .Placing

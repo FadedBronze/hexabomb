@@ -10,7 +10,7 @@ import "../utils"
 BUTTON_FONT_SIZE :: 22
 
 @(private="file")
-default_ui: ^UI
+ui_handle: ^UI
 
 Uniquifier :: union {
     u64,
@@ -174,9 +174,6 @@ Bounds :: struct {
 
 UI :: struct {
     activeId: UI_ID,
-    buttons_length: u16,
-    button_offset: u32,
-    screenSize: [2]f32,
 
     boundsStack: [MAX_LAYOUT_STACK]Bounds,
     layoutStack: [MAX_LAYOUT_STACK]Layout,
@@ -202,27 +199,25 @@ FrameBehaviour :: bit_set [enum {
     Update,
 }]
 
-init :: proc(ui_ptr: ^UI) {
-    assert(ui_ptr != nil)
-    default_ui = ui_ptr
-}
-
 within_bounds :: proc(rect: rl.Rectangle, pos: la.Vector2f32) -> bool {
     return pos.x < rect.x + rect.width && pos.x > rect.x && pos.y < rect.y + rect.height && pos.y > rect.y
 }
 
-begin_ui :: proc(bounds: Bounds, ui := default_ui) {
-    assert(ui.stackSize == 0)
-    ui.boundsStack[ui.stackSize] = bounds
-    ui.stackSize += 1
+begin_ui :: proc(ui_ptr: ^UI, bounds: Bounds) {
+    assert(ui_ptr != nil)
+    ui_handle = ui_ptr
+
+    assert(ui_handle.stackSize == 0)
+    ui_handle.boundsStack[ui_handle.stackSize] = bounds
+    ui_handle.stackSize += 1
 }
 
-end_ui :: proc(ui := default_ui) {
+end_ui :: proc(ui := ui_handle) {
     ui.stackSize -= 1
     assert(ui.stackSize == 0)
 }
 
-add_bounds :: proc(bounds: la.Vector2f32 = {1, 1}, ui := default_ui) {
+add_bounds :: proc(bounds: la.Vector2f32 = {1, 1}, ui := ui_handle) {
     layout := &ui.layoutStack[ui.stackSize-1]
     layout_bounds := ui.boundsStack[ui.stackSize-1]
 
@@ -362,7 +357,7 @@ add_bounds :: proc(bounds: la.Vector2f32 = {1, 1}, ui := default_ui) {
 
 import "core:fmt"
 
-add_layout :: proc(layout: Layout, ui := default_ui, loc := #caller_location, id: Uniquifier = 0) {
+add_layout :: proc(layout: Layout, ui := ui_handle, loc := #caller_location, id: Uniquifier = 0) {
     // should have more bounds then layouts
     assert(ui.layoutStack[ui.stackSize-1] == nil)
     
@@ -379,12 +374,12 @@ add_layout :: proc(layout: Layout, ui := default_ui, loc := #caller_location, id
     }
 }
 
-pop_bounds :: proc(ui := default_ui) {
+pop_bounds :: proc(ui := ui_handle) {
     // TODO -> checking
     ui.stackSize -= 1
 }
 
-pop_layout :: proc(ui := default_ui) {
+pop_layout :: proc(ui := ui_handle) {
     switch &v in &ui.layoutStack[ui.stackSize-1] {
     case FlexBox:
         if v.direction == .Horizontal {
@@ -412,7 +407,7 @@ button :: proc(
     size := BUTTON_FONT_SIZE,
     loc := #caller_location, 
     id: Uniquifier = 0, 
-    ui := default_ui
+    ui := ui_handle
 ) -> bool {
     return within_button(
         text, 
@@ -424,7 +419,7 @@ button :: proc(
     ) && is_left_button_pressed(ui.frameInfo)
 }
 
-get_bounds :: proc(ui := default_ui) -> Bounds {
+get_bounds :: proc(ui := ui_handle) -> Bounds {
     // TODO -> checking
     return ui.boundsStack[ui.stackSize-1]
 }
@@ -435,7 +430,7 @@ within_button :: proc(
     size := BUTTON_FONT_SIZE,
     loc := #caller_location, 
     id: Uniquifier = 0, 
-    ui := default_ui
+    ui := ui_handle
 ) -> bool {
     id := UI_ID {
         uniquifier = id,
@@ -493,7 +488,7 @@ text_display :: proc(
     color: rl.Color, 
     text_size: i32 = BUTTON_FONT_SIZE, 
     id := #caller_location, 
-    ui := default_ui
+    ui := ui_handle
 ) {
     rectangle := get_bounds()
 
@@ -544,18 +539,18 @@ generate_random_input :: proc(screenSize: [2]f32) -> InputState {
     }
 }
 
-active_id :: proc(ui := default_ui) -> ^UI_ID {
+active_id :: proc(ui := ui_handle) -> ^UI_ID {
     return &ui.activeId
 }
 
-outline :: proc(color: rl.Color, ui := default_ui) {
+outline :: proc(color: rl.Color, ui := ui_handle) {
     bounds := get_bounds(ui)
     if .Draw in ui.behaviour {
         rl.DrawRectangleLines(i32(bounds.x), i32(bounds.y), i32(bounds.width), i32(bounds.height), rl.BLACK)
     }
 }
 
-flat_color :: proc(color: rl.Color, ui := default_ui) {
+flat_color :: proc(color: rl.Color, ui := ui_handle) {
     bounds := get_bounds(ui)
     if .Draw in ui.behaviour {
         rl.DrawRectangleRec(bounds.rect, color)
@@ -570,7 +565,7 @@ toggle :: proc(
 
     loc := #caller_location, 
     id: Uniquifier = 0, 
-    ui := default_ui
+    ui := ui_handle
 ) -> bool {
     bounds := get_bounds()
 
