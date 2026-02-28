@@ -77,7 +77,7 @@ Player :: struct {
     peeking: bool,
     editorStatsOpen: bool,
     selectedDefaultTileStats: DefaultTileStatsType,
-    using uiFrameInfo: ^ui.FrameInfo,
+    using frameContext: ^ui.FrameInfo,
 }
 
 TileTypeStat :: struct {
@@ -568,16 +568,16 @@ update_app :: proc(app: ^App, dt: f32) {
 
         for i in 0..<app.playerCount {
             player := &app.gameInstance.players[i]
-            frameInfo: ui.FrameInfo
+            frameContext: ui.FrameInfo
             
             if i != app.playerIndex {
-                frameInfo = ui.FrameInfo {
+                frameContext = ui.FrameInfo {
                     inputState = app.network.inputFrames[i],
                     lastInputState = app.network.prevInputFrames[i],
                     behaviour = { }
                 }
             } else {
-                frameInfo = ui.FrameInfo {
+                frameContext = ui.FrameInfo {
                     inputState = app.network.currentInputFrameState,
                     lastInputState = app.network.lastInputFrameState,
                     behaviour = { .Draw }
@@ -585,11 +585,11 @@ update_app :: proc(app: ^App, dt: f32) {
             }
 
             if uptodate {
-                frameInfo.behaviour += { .Update }
+                frameContext.behaviour += { .Update }
             }
             
-            app.ui.frameInfo = &frameInfo
-            player.uiFrameInfo = &frameInfo
+            app.ui.frameContext = &frameContext
+            player.frameContext = &frameContext
             update_game(&app.gameInstance, dt, u8(i)) 
         }
 
@@ -602,7 +602,7 @@ update_app :: proc(app: ^App, dt: f32) {
         rl.BeginDrawing()
         rl.ClearBackground(rl.WHITE)
 
-        app.ui.frameInfo = &ui.FrameInfo{
+        app.ui.frameContext = &ui.FrameInfo{
             inputState = app.currentClientInputState,
             lastInputState = app.lastClientInputState,
             behaviour = { .Draw, .Update }

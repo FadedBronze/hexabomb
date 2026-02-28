@@ -180,7 +180,7 @@ UI :: struct {
     stackSize: u16,
 
     cache: UICache,
-    using frameInfo: ^FrameInfo,
+    using frameContext: ^FrameInfo,
 }
 
 MouseState :: enum {
@@ -397,8 +397,8 @@ pop_layout :: proc(ui := ui_handle) {
     ui.layoutStack[ui.stackSize-1] = nil
 }
 
-is_left_button_pressed :: proc(frameInfo: ^FrameInfo) -> bool {
-    return frameInfo.inputState.leftButton == .Down && frameInfo.lastInputState.leftButton == .Up
+is_left_button_pressed :: proc(frameContext: ^FrameInfo) -> bool {
+    return frameContext.inputState.leftButton == .Down && frameContext.lastInputState.leftButton == .Up
 }
 
 button :: proc(
@@ -416,7 +416,7 @@ button :: proc(
         id = id, 
         loc = loc, 
         ui = ui
-    ) && is_left_button_pressed(ui.frameInfo)
+    ) && is_left_button_pressed(ui.frameContext)
 }
 
 get_bounds :: proc(ui := ui_handle) -> Bounds {
@@ -442,17 +442,17 @@ within_button :: proc(
     col := color / rl.Color { 2, 2, 2, 1 } + rl.Color{255, 255, 255, 0} / 2
     col2 := color / rl.Color { 3, 3, 3, 1 } + rl.Color{255, 255, 255, 0} / 3 * 2
 
-    if .Draw in ui.frameInfo.behaviour {
+    if .Draw in ui.frameContext.behaviour {
         rl.DrawRectangleRec(bounds, col)
     }
-    within_button := within_bounds(bounds, ui.frameInfo.inputState.mousePos)
-    mouse_down := ui.frameInfo.inputState.leftButton == .Down
+    within_button := within_bounds(bounds, ui.frameContext.inputState.mousePos)
+    mouse_down := ui.frameContext.inputState.leftButton == .Down
 
     if within_button {
         ui.activeId = id
 
         if mouse_down {
-            if .Draw in ui.frameInfo.behaviour {
+            if .Draw in ui.frameContext.behaviour {
                 rl.DrawRectangleRec(bounds, col2)
             }
         }
@@ -465,10 +465,10 @@ within_button :: proc(
     pressed := false
 
     if id == ui.activeId {
-        if .Draw in ui.frameInfo.behaviour {
+        if .Draw in ui.frameContext.behaviour {
             rl.DrawRectangleLines(i32(bounds.x), i32(bounds.y), i32(bounds.width), i32(bounds.height), rl.BLACK)
         }
-        pressed = is_left_button_pressed(ui.frameInfo)
+        pressed = is_left_button_pressed(ui.frameContext)
     }
 
     buf: [64]u8
@@ -476,11 +476,11 @@ within_button :: proc(
 
     text_width := rl.MeasureText(str, i32(size))
 
-    if .Draw in ui.frameInfo.behaviour {
+    if .Draw in ui.frameContext.behaviour {
         rl.DrawText(str, i32(bounds.x + bounds.width/2) - i32(text_width)/2, i32(bounds.y + bounds.height/2) - i32(size)/2, i32(size), rl.BLACK)
     }
 
-    return within_button && .Update in ui.frameInfo.behaviour
+    return within_button && .Update in ui.frameContext.behaviour
 }
 
 text_display :: proc(
@@ -492,7 +492,7 @@ text_display :: proc(
 ) {
     rectangle := get_bounds()
 
-    if .Draw not_in ui.frameInfo.behaviour {
+    if .Draw not_in ui.frameContext.behaviour {
         return
     }
 
@@ -581,10 +581,10 @@ toggle :: proc(
     within := within_bounds(bounds, ui.inputState.mousePos)
  
     if within {
-        if .Draw in ui.frameInfo.behaviour {
+        if .Draw in ui.frameContext.behaviour {
             rl.DrawRectangleLines(i32(bounds.x), i32(bounds.y), i32(bounds.width), i32(bounds.height), rl.BLACK)
         }
     }
     
-    return within && is_left_button_pressed(ui.frameInfo) && .Update in ui.frameInfo.behaviour
+    return within && is_left_button_pressed(ui.frameContext) && .Update in ui.frameContext.behaviour
 }
