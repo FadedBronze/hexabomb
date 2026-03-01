@@ -336,6 +336,11 @@ crown_winner :: proc(game: ^Game) {
 
 update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
     player := &game.players[currentPlayerIndex]
+    trigger: ui.TriggerType
+
+    if player.ui_buffer.inputMode == .Mouse{
+        trigger, _ = ui.trigger()
+    }
 
     if game.state != .GameSelector {
         if .Update in player.behaviour {
@@ -429,7 +434,7 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
                 }
                 hover_tilegrid(&game.tileGrid, player)
             }
-        } else {
+        } else if trigger != .NotActive {
             player.tileCursorLocation = get_tile_grid_pos(&game.tileGrid, player.frameContext.inputState.mousePos)
             hover_tilegrid(&game.tileGrid, player)
         }
