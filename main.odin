@@ -334,6 +334,8 @@ crown_winner :: proc(game: ^Game) {
 }
 
 update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
+    trigger_type, bounds := ui.trigger()
+
     player := &game.players[currentPlayerIndex]
 
     if game.state != .GameSelector {
@@ -395,7 +397,10 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
 
         edit_map_stats_ui(game, currentPlayerIndex)
         ui_layout(game, currentPlayerIndex)
-        hover_tilegrid(&game.tileGrid, player)
+
+        if trigger_type != .NotActive {
+            hover_tilegrid(&game.tileGrid, player)
+        }    
     }
 }
 

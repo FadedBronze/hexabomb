@@ -6,6 +6,7 @@ import strings "core:strings"
 import "core:math/rand"
 import "../utils"
 import "core:fmt"
+import box "../containers"
 
 BUTTON_FONT_SIZE :: 22
 @(private="file")
@@ -163,7 +164,7 @@ FlexBox :: struct {
 MAX_LAYOUT_STACK :: 16
 
 UICache :: struct {
-    prevFlexOffset: map[UI_ID]la.Vector2f32,
+    prevFlexOffset: box.SmallMap(64, UI_ID, la.Vector2f32),
 }
 
 Bounds :: struct {
@@ -239,11 +240,13 @@ add_bounds :: proc(bounds: la.Vector2f32 = {1, 1}, ui := ui_handle) {
         case .Linear:
             //default
         case .Centered:
+            prevFlexOffset := box.sm_get_ptr(&ui_handle.cache.prevFlexOffset, v.id)
+
             switch v.direction {
             case .Horizontal:
-                x_off = layout_bounds.x + layout_bounds.width / 2 - ui.cache.prevFlexOffset[v.id].x / 2
+                x_off = layout_bounds.x + layout_bounds.width / 2 - prevFlexOffset.x / 2
             case .Vertical:
-                y_off = layout_bounds.y + layout_bounds.height / 2 - ui.cache.prevFlexOffset[v.id].y / 2
+                y_off = layout_bounds.y + layout_bounds.height / 2 - prevFlexOffset.y / 2
             }
         case .Spaced:
             unimplemented()
@@ -366,7 +369,7 @@ pop_layout :: proc(ui := ui_handle) {
             v.offset.y -= v.gap
         }
 
-        ui.cache.prevFlexOffset[v.id] = v.offset
+        box.sm_set(&ui_handle.cache.prevFlexOffset, v.id, v.offset)
     case MarginLayout:
     }
     // TODO -> checking
@@ -393,6 +396,12 @@ get_bounds :: proc(ui: ^UI) -> Bounds {
 }
 
 trigger :: proc(
+    loc := #caller_location, id: Uniquifier = 0, ui := ui_handle
+) -> (TriggerType, Bounds) {
+    return trigger_(ui, loc, id)
+}
+
+trigger_ :: proc(
     ui: ^UI,
     loc: rn.Source_Code_Location, 
     id: Uniquifier, 
@@ -442,7 +451,7 @@ button_base :: proc(
     text: string, color: rl.Color, size := BUTTON_FONT_SIZE,
     loc := #caller_location, id: Uniquifier = 0, ui := ui_handle
 ) -> TriggerType {
-    trigger, bounds := trigger(ui, loc, id)
+    trigger, bounds := trigger_(ui, loc, id)
     fill_rect(ui, utils.blend_two_colors(color, rl.WHITE, 0.50), bounds)
     within_button := within_bounds(bounds, ui.frameContext.inputState.mousePos)
     if trigger == .Down { fill_rect(ui, utils.blend_two_colors(color, rl.WHITE, 0.66), bounds) }
@@ -529,7 +538,7 @@ toggle :: proc(
     id: Uniquifier = 0, 
     ui := ui_handle
 ) -> bool {
-    trigger, bounds := trigger(ui, loc, id)
+    trigger, bounds := trigger_(ui, loc, id)
     color := toggled ? utils.blend_two_colors(on_color, rl.WHITE, 0.50) : utils.blend_two_colors(off_color, rl.WHITE, 0.50)
     fill_rect(ui, color, bounds)
     within := within_bounds(bounds, ui.inputState.mousePos)

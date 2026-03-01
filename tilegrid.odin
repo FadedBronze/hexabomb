@@ -204,20 +204,10 @@ get_active_tile :: proc(tilegrid: ^TileGrid, player: ^Player) -> (^Tile, HalfGri
     return &tilegrid.tiles[idx], HalfGridPosition{i16(x)-HALF_MAX_GRID_SIZE, i16(y)-HALF_MAX_GRID_SIZE}
 }
 
-hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player, loc := #caller_location) {
-    id := ui.UI_ID {
-        loc = loc,
-    }
+hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player) {
+    type, bounds := ui.trigger()
 
-    if ui.active_id()^ == ui.empty_id() {
-        ui.active_id()^ = id
-    }
-
-    if .Draw not_in player.behaviour {
-        return
-    }
-
-    if ui.active_id()^ != id {
+    if type == .NotActive {
         return
     }
 
