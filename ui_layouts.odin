@@ -651,7 +651,7 @@ game_endscreen :: proc(game: ^Game, currentPlayerIndex: u8) {
     })
 
     ui.add_bounds({100, 60})
-    peeking := ui.within_button("peek", player.color) && player.inputState.leftButton == .Down
+    peeking := ui.held_button("peek", player.color)
     if .Update in player.behaviour {
         player.peeking = peeking
     }

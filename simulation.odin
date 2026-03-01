@@ -4,6 +4,7 @@ import "core:math"
 import rl "vendor:raylib"
 import "core:math/rand"
 import sm "core:container/small_array"
+import "utils"
 
 Shot :: struct {
     position: la.Vector2f32,
@@ -144,37 +145,6 @@ trail_emitter := ParticleBase {
     summon = &trail_particle,
 }
 
-blend_two_colors :: proc(b: rl.Color, a: rl.Color, t: f32) -> rl.Color {
-    rr := (f32(a.r) - f32(b.r)) * t + f32(b.r)
-    gg := (f32(a.g) - f32(b.g)) * t + f32(b.g)
-    bb := (f32(a.b) - f32(b.b)) * t + f32(b.b)
-    aa := (f32(a.a) - f32(b.a)) * t + f32(b.a)
-
-    return rl.Color{u8(rr), u8(gg), u8(bb), u8(aa)}
-}
-
-blend_colors :: proc(colors: []rl.Color, t: f32) -> rl.Color {
-    assert(len(colors)>0)
-
-    if len(colors) == 1 {
-        return colors[0]
-    }
-
-    t := t
-    if t == 1 {
-        t = 0.999
-    }
-
-    curr := t * f32(len(colors)-1)
-
-    colorIdxDown: int = int(curr)
-    colorIdxUp: int = int(curr)+1
-
-    t = (curr - f32(colorIdxDown)) / f32(len(colors))
-
-    return blend_two_colors(colors[colorIdxDown], colors[colorIdxUp], t)
-}
-
 Simulation :: struct {
     entities: sm.Small_Array(MAX_ENTITIES, SimulationEntity),
     particles: sm.Small_Array(MAX_PARTICLES, Particle),
@@ -241,7 +211,7 @@ simulate_particles :: proc(game: ^Game, dt: f32) -> (completed_particles: bool) 
 
         t := elapsed / particle.initialTimeSeconds
 
-        color := blend_colors(
+        color := utils.blend_colors(
             particle.colors,
             particle.colorDecay(t)
         )

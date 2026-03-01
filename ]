@@ -1,13 +1,14 @@
 package ui
+
 import rl "vendor:raylib"
 import rn "base:runtime"
 import la "core:math/linalg"
 import strings "core:strings"
 import "core:math/rand"
 import "../utils"
-import "core:fmt"
 
 BUTTON_FONT_SIZE :: 22
+
 @(private="file")
 ui_handle: ^UI
 
@@ -155,6 +156,7 @@ FlexBox :: struct {
     corner: FlexCorner,
     spacing: FlexSpacing,
     gap: f32,
+
     //state
     offset: la.Vector2f32,
     maxSizes: la.Vector2f32,
@@ -218,10 +220,12 @@ end_ui :: proc(ui := ui_handle) {
 add_bounds :: proc(bounds: la.Vector2f32 = {1, 1}, ui := ui_handle) {
     layout := &ui.layoutStack[ui.stackSize-1]
     layout_bounds := ui.boundsStack[ui.stackSize-1]
+
     b := Bounds {
         width = (-1 <= bounds.x && bounds.x <= 1) ? bounds.x * layout_bounds.width : bounds.x,
         height = (-1 <= bounds.y && bounds.y <= 1) ? bounds.y * layout_bounds.height : bounds.y,
     }
+
     switch &v in layout {
     case nil:
         // Cannot add a bounds onto a bounds
@@ -229,12 +233,14 @@ add_bounds :: proc(bounds: la.Vector2f32 = {1, 1}, ui := ui_handle) {
         assert(false)
     case FlexBox:
         assert(b.width != 0 && b.height != 0)
+
         x_off := .Left not_in v.corner ?\
             layout_bounds.width + layout_bounds.x - b.width :\ 
             layout_bounds.x
         y_off := .Top not_in v.corner ?\ 
             layout_bounds.height + layout_bounds.y - b.height :\ 
             layout_bounds.y
+        
         switch v.spacing {
         case .Linear:
             //default
@@ -248,14 +254,17 @@ add_bounds :: proc(bounds: la.Vector2f32 = {1, 1}, ui := ui_handle) {
         case .Spaced:
             unimplemented()
         }
+
         switch v.direction {
         case .Horizontal:
             v.maxSizes.y = max(v.maxSizes.y, b.height)
+
             if v.offset.x + b.width > layout_bounds.width {
                 v.offset.y += v.maxSizes.y + v.gap
                 v.offset.x = 0
                 v.maxSizes.y = 0
             }
+
             ui.boundsStack[ui.stackSize] = Bounds {
                 width = b.width,
                 height = b.height,
@@ -263,6 +272,7 @@ add_bounds :: proc(bounds: la.Vector2f32 = {1, 1}, ui := ui_handle) {
                 y = y_off + (.Top not_in v.corner ? -v.offset.y : v.offset.y),
             }
             ui.stackSize += 1
+            
             v.offset.x += b.width + v.gap
         case .Vertical:
             v.maxSizes.x = max(v.maxSizes.x, b.width)
@@ -272,6 +282,7 @@ add_bounds :: proc(bounds: la.Vector2f32 = {1, 1}, ui := ui_handle) {
                 v.offset.y = 0
                 v.maxSizes.x = 0
             }
+
             ui.boundsStack[ui.stackSize] = Bounds {
                 width = b.width,
                 height = b.height,
@@ -279,6 +290,7 @@ add_bounds :: proc(bounds: la.Vector2f32 = {1, 1}, ui := ui_handle) {
                 y = y_off + (.Top not_in v.corner ? -v.offset.y : v.offset.y),
             }
             ui.stackSize += 1
+            
             v.offset.y += b.height + v.gap
         }
     case MarginLayout:
@@ -289,6 +301,7 @@ add_bounds :: proc(bounds: la.Vector2f32 = {1, 1}, ui := ui_handle) {
             width = layout_bounds.width - (v.right.value+v.left.value),
             height = layout_bounds.height - (v.top.value+v.bottom.value)
         }
+
         // Case 2
         case2 := Bounds {
             x = layout_bounds.x + layout_bounds.width / 2 - v.left.value,
@@ -296,11 +309,13 @@ add_bounds :: proc(bounds: la.Vector2f32 = {1, 1}, ui := ui_handle) {
             width = v.right.value+v.left.value,
             height = v.top.value+v.bottom.value
         }
+
         // Subcases
         all := Bounds {
             x = v.left.relativity == .FromEdge ? case1.x : case2.x,
             y = v.top.relativity == .FromEdge ? case1.y : case2.y,
         }
+
         switch v.right.relativity {
         case .FromCenter:
             switch v.left.relativity {
@@ -317,6 +332,7 @@ add_bounds :: proc(bounds: la.Vector2f32 = {1, 1}, ui := ui_handle) {
                 all.width = case1.width
             }
         }
+        
         switch v.top.relativity {
         case .FromCenter:
             switch v.bottom.relativity {
@@ -333,19 +349,27 @@ add_bounds :: proc(bounds: la.Vector2f32 = {1, 1}, ui := ui_handle) {
                 all.height = case1.height
             }
         }
+
         ui.boundsStack[ui.stackSize] = all
         ui.stackSize += 1
     }
 }
 
+import "core:fmt"
+
 add_layout :: proc(layout: Layout, ui := ui_handle, loc := #caller_location, id: Uniquifier = 0) {
     // should have more bounds then layouts
     assert(ui.layoutStack[ui.stackSize-1] == nil)
+    
     bounds := ui.boundsStack[ui.stackSize-1]
     ui.layoutStack[ui.stackSize-1] = layout
+
     switch &v in &ui.layoutStack[ui.stackSize-1] {
     case FlexBox:
-        v.id = UI_ID{ uniquifier = id, loc = loc }
+        v.id = UI_ID{
+            uniquifier = id,
+            loc = loc,
+        }
     case MarginLayout:
     }
 }
@@ -377,114 +401,126 @@ is_left_button_pressed :: proc(frameContext: ^FrameInfo) -> bool {
     return frameContext.inputState.leftButton == .Down && frameContext.lastInputState.leftButton == .Up
 }
 
-is_left_button_held :: proc(frameContext: ^FrameInfo) -> bool {
-    return frameContext.inputState.leftButton == .Down
-}
-
-TriggerType :: enum {
-    NotActive,
-    Up,
-    Down,
-    Clicked,
-}
-
-get_bounds :: proc(ui: ^UI) -> Bounds {
-    return ui.boundsStack[ui.stackSize-1]
-}
-
-trigger :: proc(
-    ui: ^UI,
-    loc: rn.Source_Code_Location, 
-    id: Uniquifier, 
-) -> (TriggerType, Bounds) {
-    id := UI_ID { uniquifier = id, loc = loc }
-    bounds := ui.boundsStack[ui.stackSize-1]
-    if within_bounds(bounds, ui.inputState.mousePos) {
-        ui.activeId = id
-        if is_left_button_pressed(ui.frameContext) {
-            if .Update not_in ui.behaviour { return .Up, bounds }
-            return .Clicked, bounds
-        } else if is_left_button_held(ui.frameContext) {
-            return .Down, bounds
-        }
-        return .Up, bounds
-    } else if ui.activeId == id {
-        ui.activeId = empty_id()
-    }
-    return .NotActive, bounds
+ButtonParams :: struct {
+    text: string, 
+    color: rl.Color, 
+    size: int,
 }
 
 button :: proc(
-    text: string, color: rl.Color, size := BUTTON_FONT_SIZE,
-    loc := #caller_location, id: Uniquifier = 0, ui := ui_handle
+    params: ^ButtonParams,
+    loc := #caller_location, 
+    id: Uniquifier = 0, 
+    ui := ui_handle
 ) -> bool {
-    return button_base(text, color, size, loc, id, ui) == .Clicked
+    return within_button(
+        params,
+        id = id, 
+        loc = loc, 
+        ui = ui
+    ) && is_left_button_pressed(ui.frameContext)
 }
 
-held_button :: proc(
-    text: string, color: rl.Color, size := BUTTON_FONT_SIZE,
-    loc := #caller_location, id: Uniquifier = 0, ui := ui_handle
+get_bounds :: proc(ui := ui_handle) -> Bounds {
+    // TODO -> checking
+    return ui.boundsStack[ui.stackSize-1]
+}
+
+within_button :: proc(
+    params: ^ButtonParams,
+    loc := #caller_location, 
+    id: Uniquifier = 0, 
+    ui := ui_handle
 ) -> bool {
-    return button_base(text, color, size, loc, id, ui) == .Down
-}
+    id := UI_ID {
+        uniquifier = id,
+        loc = loc,
+    }
 
-fill_rect :: proc(ui: ^UI, colour: rl.Color, bounds: Bounds) {
-    if .Draw not_in ui.behaviour { return }
-    rl.DrawRectangleRec(bounds.rect, colour)
-}
+    bounds := get_bounds(ui)
 
-outline_rect :: proc(ui: ^UI, colour: rl.Color, bounds: Bounds) {
-    if .Draw not_in ui.behaviour { return }
-    rl.DrawRectangleLines(i32(bounds.x), i32(bounds.y), i32(bounds.width), i32(bounds.height), colour)
-}
+    col := params.color / rl.Color { 2, 2, 2, 1 } + rl.Color{255, 255, 255, 0} / 2
+    col2 := params.color / rl.Color { 3, 3, 3, 1 } + rl.Color{255, 255, 255, 0} / 3 * 2
 
-button_base :: proc( 
-    text: string, color: rl.Color, size := BUTTON_FONT_SIZE,
-    loc := #caller_location, id: Uniquifier = 0, ui := ui_handle
-) -> TriggerType {
-    trigger, bounds := trigger(ui, loc, id)
-    fill_rect(ui, utils.blend_two_colors(color, rl.WHITE, 0.50), bounds)
+    if .Draw in ui.frameContext.behaviour {
+        rl.DrawRectangleRec(bounds, col)
+    }
     within_button := within_bounds(bounds, ui.frameContext.inputState.mousePos)
-    if trigger == .Down { fill_rect(ui, utils.blend_two_colors(color, rl.WHITE, 0.66), bounds) }
-    if trigger != .NotActive { outline_rect(ui, rl.BLACK, bounds) }
-    if .Draw in ui.frameContext.behaviour { draw_text(ui, text, rl.BLACK, bounds, size) }
-    return trigger
-}
+    mouse_down := ui.frameContext.inputState.leftButton == .Down
 
-draw_text :: proc(
-    ui: ^UI, text: string, colour: rl.Color, 
-    bounds: Bounds, size: int
-) {
+    if within_button {
+        ui.activeId = id
+
+        if mouse_down {
+            if .Draw in ui.frameContext.behaviour {
+                rl.DrawRectangleRec(bounds, col2)
+            }
+        }
+    }
+
+    if !within_button && id == ui.activeId {
+        ui.activeId = empty_id()
+    }
+
+    pressed := false
+
+    if id == ui.activeId {
+        if .Draw in ui.frameContext.behaviour {
+            rl.DrawRectangleLines(i32(bounds.x), i32(bounds.y), i32(bounds.width), i32(bounds.height), rl.BLACK)
+        }
+        pressed = is_left_button_pressed(ui.frameContext)
+    }
+
     buf: [64]u8
-    str := strings.unsafe_string_to_cstring(utils.concatenate(buf[:], text, "\x00"))
-    text_width := rl.MeasureText(str, i32(size))
-    rl.DrawText(
-        str, 
-        i32(bounds.x + bounds.width/2) - i32(text_width)/2, 
-        i32(bounds.y + bounds.height/2) - i32(size)/2, 
-        i32(size), 
-        colour,
-    )
+    str := strings.unsafe_string_to_cstring(utils.concatenate(buf[:], params.text, "\x00"))
+
+    text_width := rl.MeasureText(str, i32(params.size))
+
+    if .Draw in ui.frameContext.behaviour {
+        rl.DrawText(str, i32(bounds.x + bounds.width/2) - i32(text_width)/2, i32(bounds.y + bounds.height/2) - i32(params.size)/2, i32(size), rl.BLACK)
+    }
+
+    return within_button && .Update in ui.frameContext.behaviour
 }
 
 text_display :: proc(
-    text: string, colour: rl.Color, 
-    size: int = BUTTON_FONT_SIZE, id := #caller_location, ui := ui_handle
+    text: string, 
+    color: rl.Color, 
+    text_size: i32 = BUTTON_FONT_SIZE, 
+    id := #caller_location, 
+    ui := ui_handle
 ) {
-    rectangle := get_bounds(ui)
-    draw_text(ui, text, colour, rectangle, size)
+    rectangle := get_bounds()
+
+    if .Draw not_in ui.frameContext.behaviour {
+        return
+    }
+
+    str := strings.unsafe_string_to_cstring(strings.concatenate({text, "\x00"}, allocator=context.temp_allocator))
+    text_width := rl.MeasureText(str, text_size)
+
+    rl.DrawText(str, i32(rectangle.x + rectangle.width/2) - i32(text_width)/2, i32(rectangle.y + rectangle.height/2) - BUTTON_FONT_SIZE/2, text_size, color)
 }
 
-empty_id :: proc() -> UI_ID { return UI_ID {} }
+empty_id :: proc() -> UI_ID {
+    return UI_ID {}
+}
 
 get_button_state :: proc() -> MouseState {
-    if rl.IsMouseButtonDown(.LEFT) { return .Down }
-    if rl.IsMouseButtonUp(.LEFT) { return .Up }
+    if rl.IsMouseButtonDown(.LEFT) {
+        return .Down
+    }
+
+    if rl.IsMouseButtonUp(.LEFT) {
+        return .Up
+    }
+
     unreachable()
 }
 
 get_input_state :: proc() -> InputState {
     screenSize := la.Vector2f32{f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())}
+
     return InputState {
         mousePos = rl.GetMousePosition(),
         leftButton = get_button_state(),
@@ -524,15 +560,47 @@ flat_color :: proc(color: rl.Color, ui := ui_handle) {
 toggle :: proc(
     on_color: rl.Color, 
     off_color: rl.Color, 
+
     toggled: bool,
+
     loc := #caller_location, 
     id: Uniquifier = 0, 
     ui := ui_handle
 ) -> bool {
-    trigger, bounds := trigger(ui, loc, id)
-    color := toggled ? utils.blend_two_colors(on_color, rl.WHITE, 0.50) : utils.blend_two_colors(off_color, rl.WHITE, 0.50)
-    fill_rect(ui, color, bounds)
+    bounds := get_bounds()
+
+    col := on_color / rl.Color { 2, 2, 2, 1 } + rl.Color{255, 255, 255, 0} / 2
+    col2 := off_color / rl.Color { 2, 2, 2, 1 } + rl.Color{255, 255, 255, 0} / 2
+
+    if toggled {
+        rl.DrawRectangleRec(bounds.rect, col)
+    } else {
+        rl.DrawRectangleRec(bounds.rect, col2)
+    }
+
     within := within_bounds(bounds, ui.inputState.mousePos)
-    if within { outline_rect(ui, rl.BLACK, bounds) }
+ 
+    if within {
+        if .Draw in ui.frameContext.behaviour {
+            rl.DrawRectangleLines(i32(bounds.x), i32(bounds.y), i32(bounds.width), i32(bounds.height), rl.BLACK)
+        }
+    }
+    
     return within && is_left_button_pressed(ui.frameContext) && .Update in ui.frameContext.behaviour
+}
+
+BoundedButtonParams :: struct {
+    using buttonParams: ButtonParams,
+    bounds: la.Vector2f32,
+}
+
+bounded_button :: proc(
+    params: ^BoundedButtonParams,
+    loc := #caller_location, 
+    id: Uniquifier = 0, 
+    ui := ui_handle
+) -> bool {
+    add_bounds(params.bounds, ui)
+    button(params.buttonParams, ui = ui)
+    pop_bounds(ui)
 }
