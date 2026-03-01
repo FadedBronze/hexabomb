@@ -76,6 +76,7 @@ Player :: struct {
     activeTileId: u32,
     peeking: bool,
     editorStatsOpen: bool,
+    tileCursorLocation: HalfGridPosition,
     selectedDefaultTileStats: DefaultTileStatsType,
     using frameContext: ^ui.FrameInfo,
     ui_buffer: ui.UI,
@@ -334,8 +335,6 @@ crown_winner :: proc(game: ^Game) {
 }
 
 update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
-    trigger_type, bounds := ui.trigger()
-
     player := &game.players[currentPlayerIndex]
 
     if game.state != .GameSelector {
@@ -398,15 +397,42 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
         edit_map_stats_ui(game, currentPlayerIndex)
         ui_layout(game, currentPlayerIndex)
 
-        if trigger_type != .NotActive {
-            if ui.is_button_pressed(player.frameContext, .Enter) {
-                ui.capture_key_input()
-            }
-            if ui.is_button_pressed(player.frameContext, .Backspace) {
+        if player.ui_buffer.inputMode != .Mouse {
+            if ui.is_button_pressed(player.frameContext, .Semicolon) {
                 ui.exit_capture_key_input()
             }
+            if ui.is_button_pressed(player.frameContext, .SingleQuote) {
+                player.ui_buffer.cursorLocation = {0, 0}
+                ui.capture_key_input()
+                player.editMode = .Clicking
+                player.activeTileId = 0
+            }
+            //TODO: how do you know this is the correct capture? -- YOU DON'T!!
+            if player.ui_buffer.inputMode == .CapturedKeyboard {
+                if ui.is_button_pressed(player.frameContext, .W) {
+                    player.tileCursorLocation += directions[.Down]
+                }
+                if ui.is_button_pressed(player.frameContext, .E) {
+                    player.tileCursorLocation += directions[.RightDown]
+                }
+                if ui.is_button_pressed(player.frameContext, .Q) {
+                    player.tileCursorLocation += directions[.LeftDown]
+                }
+                if ui.is_button_pressed(player.frameContext, .S) {
+                    player.tileCursorLocation += directions[.Up]
+                }
+                if ui.is_button_pressed(player.frameContext, .D) {
+                    player.tileCursorLocation += directions[.RightUp]
+                }
+                if ui.is_button_pressed(player.frameContext, .A) {
+                    player.tileCursorLocation += directions[.LeftUp]
+                }
+                hover_tilegrid(&game.tileGrid, player)
+            }
+        } else {
+            player.tileCursorLocation = get_tile_grid_pos(&game.tileGrid, player.frameContext.inputState.mousePos)
             hover_tilegrid(&game.tileGrid, player)
-        }    
+        }
     }
 }
 

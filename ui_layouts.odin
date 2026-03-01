@@ -83,6 +83,11 @@ ui_layout :: proc(game: ^Game, currentPlayerIndex: u8) {
                 player.editMode = .Placing
                 player.selectedTileType = tile
                 player.activeTileId = 0
+
+                if player.ui_buffer.inputMode == .Keyboard {
+                    player.ui_buffer.cursorLocation = {0, 0}
+                    ui.capture_key_input()
+                }
             }
             ui.pop_bounds()
         }

@@ -19,22 +19,22 @@ HexDirection :: enum {
     LeftUp,
 }
 
-directions := [][2]i16 {
-    {0, 2},
-    {1, 1},
-    {1, -1},
-    {0, -2},
-    {-1, -1},
-    {-1, 1},
+directions := [HexDirection][2]i16 {
+    .Up = {0, 2},
+    .RightUp = {1, 1},
+    .RightDown = {1, -1},
+    .Down = {0, -2},
+    .LeftDown = {-1, -1},
+    .LeftUp = {-1, 1},
 }
 
-directionHexnormalized := [][2]f32 {
-    {0, 1},
-    {math.sqrt_f32(3)/2, 0.5},
-    {math.sqrt_f32(3)/2, -0.5},
-    {0, -1},
-    {-math.sqrt_f32(3)/2, -0.5},
-    {-math.sqrt_f32(3)/2, 0.5},
+directionHexnormalized := [HexDirection][2]f32 {
+    .Up = {0, 1},
+    .RightUp = {math.sqrt_f32(3)/2, 0.5},
+    .RightDown = {math.sqrt_f32(3)/2, -0.5},
+    .Down = {0, -1},
+    .LeftDown = {-math.sqrt_f32(3)/2, -0.5},
+    .LeftUp = {-math.sqrt_f32(3)/2, 0.5},
 }
 
 HalfGridPosition :: [2]i16
@@ -205,7 +205,7 @@ get_active_tile :: proc(tilegrid: ^TileGrid, player: ^Player) -> (^Tile, HalfGri
 }
 
 hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player) {
-    halfgrid := get_tile_grid_pos(tileGrid, player.inputState.mousePos)
+    halfgrid := player.tileCursorLocation
     
     if player.editMode == .Clicking {
         if player.activeTileId != 0 {
@@ -339,8 +339,8 @@ render_gameboard :: proc(game: ^Game, currentPlayerIndex: u8) {
                     dir := directionHexnormalized[tile.direction] * 7
 
                     rl.DrawTriangle(
-                        spos + directionHexnormalized[(i8(tile.direction)+1)%6] * 8 + dir,
-                        spos + directionHexnormalized[(i8(tile.direction)-1 == -1) ? 5 : i8(tile.direction)-1] * 8 + dir, 
+                        spos + directionHexnormalized[HexDirection((i8(tile.direction)+1)%6)] * 8 + dir,
+                        spos + directionHexnormalized[HexDirection((i8(tile.direction)-1 == -1) ? 5 : i8(tile.direction)-1)] * 8 + dir, 
                         spos + directionHexnormalized[tile.direction] * 8 + dir, 
                         rl.Color{0, 0, 0, 255})
                 }

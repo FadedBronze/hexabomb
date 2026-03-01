@@ -208,8 +208,10 @@ InputKey :: enum {
     D,
     Q,
     E,
+    L,
+    Semicolon,
+    SingleQuote,
     Enter,
-    Backspace,
 }
 
 InputState :: struct {
@@ -623,8 +625,10 @@ get_button_state :: proc() -> bit_set[InputKey] {
     if rl.IsKeyDown(.D) { res += { .D } }
     if rl.IsKeyDown(.Q) { res += { .Q } }
     if rl.IsKeyDown(.E) { res += { .E } }
+    if rl.IsKeyDown(.L) { res += { .L } }
     if rl.IsKeyDown(.ENTER) { res += { .Enter } }
-    if rl.IsKeyDown(.BACKSPACE) { res += { .Backspace } }
+    if rl.IsKeyDown(.SEMICOLON) { res += { .Semicolon } }
+    if rl.IsKeyDown(.APOSTROPHE) { res += { .SingleQuote } }
     return res
 }
 

@@ -307,11 +307,12 @@ next_to_own_territory :: proc(game: ^Game, currentPlayerIndex: u8, halfGridPos: 
 place_tile_editor :: proc(game: ^Game, currentPlayerIndex: u8) {
     player := &game.players[currentPlayerIndex]
 
-    if !ui.is_button_pressed(player.frameContext, .leftMouseButton) {
+    if !ui.any_button_pressed(player.frameContext, .leftMouseButton, .Enter) {
         return
     }
 
-    within_bounds, halfgridPos := get_tile_grid_pos_safe(&game.tileGrid, player.inputState.mousePos)
+    halfgridPos := player.tileCursorLocation
+    within_bounds := within_game_bounds(game, halfgridPos)
     
     if !within_bounds {
         return
@@ -323,7 +324,8 @@ place_tile_editor :: proc(game: ^Game, currentPlayerIndex: u8) {
 can_place_tile :: proc(game: ^Game, currentPlayerIndex: u8, editor := false) -> bool {
     player := &game.players[currentPlayerIndex]
 
-    within_bounds, halfgridPos := get_tile_grid_pos_safe(&game.tileGrid, player.inputState.mousePos)
+    halfgridPos := player.tileCursorLocation
+    within_bounds := within_game_bounds(game, halfgridPos)
     
     if !within_bounds {
         return false
@@ -484,17 +486,19 @@ create_tile :: proc(game: ^Game, editingPlayerIdx: u8, playerId: u8, halfGridPos
 place_tile_game :: proc(game: ^Game, currentPlayerIndex: u8) {
     player := &game.players[currentPlayerIndex]
 
-    if !ui.is_button_pressed(player.frameContext, .leftMouseButton) {
+    if !(player.ui_buffer.inputMode == .CapturedKeyboard && ui.any_button_pressed(player.frameContext, .Enter)) &&\ 
+    !ui.any_button_pressed(player.frameContext, .leftMouseButton)
+    {
         return
-    }
-
+    } 
+    
     if !can_place_tile(game, currentPlayerIndex, false) {
         return
     }
 
     pay_active_tile_cost(game, player)
 
-    _, halfgridPos := get_tile_grid_pos_safe(&game.tileGrid, player.inputState.mousePos)
+    halfgridPos := player.tileCursorLocation
 
     create_tile(game, currentPlayerIndex, currentPlayerIndex+1, halfgridPos)
 }
@@ -519,7 +523,8 @@ format_cost_and_scaling :: proc(game: ^Game, tileType: TileType, bufstr: []u8) -
 click_tile :: proc(game: ^Game, editingPlayerIndex: u8, playerId: u8) {
     player := &game.players[editingPlayerIndex]
 
-    within_bounds, halfgrid := get_tile_grid_pos_safe(&game.tileGrid, player.inputState.mousePos)
+    halfgrid := player.tileCursorLocation
+    within_bounds := within_game_bounds(game, halfgrid)
 
     if !within_bounds {
         return
@@ -531,7 +536,7 @@ click_tile :: proc(game: ^Game, editingPlayerIndex: u8, playerId: u8) {
         return
     }
 
-    if ui.is_button_pressed(player.frameContext, .leftMouseButton) {
+    if ui.any_button_pressed(player.frameContext, .leftMouseButton, .Enter) {
         if rl.IsKeyDown(.LEFT_SHIFT) {
             log.msg("debug", hovered_tile)
         }
