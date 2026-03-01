@@ -7,7 +7,11 @@ SmallMap :: struct(S: int, K: typeid, V: typeid) {
 }
 
 sm_get :: proc(sm: ^SmallMap($S, $K, $V), key: K) -> V {
-    return sm_get_ptr(sm, key)^
+    ptr := sm_get_ptr(sm, key)
+    if ptr == nil {
+        return V{}
+    }
+    return ptr^
 }
 
 sm_get_ptr :: proc(sm: ^SmallMap($S, $K, $V), key: K) -> ^V {
@@ -72,10 +76,10 @@ sm_remove :: proc(smi: ^SmallMapIterator($S, $K, $V)) {
 }
 
 sm_iterate_ptr :: proc(smi: ^SmallMapIterator($S, $K, $V)) -> (K, ^V, bool) {
-    smi.offset += 1
     if smi.offset >= smi.sm.len {
         return K{}, &smi.sm.empty, false
     }
-    entry := smi.sm.data[smi.offset]
+    entry := &smi.sm.data[smi.offset]
+    smi.offset += 1
     return entry.key, &entry.value, true
 }

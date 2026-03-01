@@ -163,8 +163,18 @@ FlexBox :: struct {
 
 MAX_LAYOUT_STACK :: 16
 
+Trigger :: struct {
+    type: TriggerType,
+    bounds: Bounds,
+    depth: u16,
+    // At the end of the frame, if it is the lowest depth trigger,
+    // it will be confirmed for the next frame.
+    confirmed: bool,
+}
+
 UICache :: struct {
     prevFlexOffset: box.SmallMap(64, UI_ID, la.Vector2f32),
+    prevTriggers: box.SmallMap(64, UI_ID, Trigger),
 }
 
 Bounds :: struct {
@@ -205,13 +215,31 @@ within_bounds :: proc(rect: rl.Rectangle, pos: la.Vector2f32) -> bool {
 begin_ui :: proc(ui_ptr: ^UI, bounds: Bounds) {
     assert(ui_ptr != nil)
     ui_handle = ui_ptr
-
     assert(ui_handle.stackSize == 0)
     ui_handle.boundsStack[ui_handle.stackSize] = bounds
     ui_handle.stackSize += 1
 }
 
 end_ui :: proc(ui := ui_handle) {
+    active_id := empty_id()
+    active_trigger := Trigger{}
+    smi := box.sm_iterator(&ui.cache.prevTriggers)
+    for k, v in box.sm_iterate_ptr(&smi) {
+        if v.confirmed {
+            box.sm_remove(&smi)
+            continue
+        }
+        if v.type != .NotActive && v.depth > active_trigger.depth {
+            active_trigger = v^
+            active_id = k
+        }
+        v.confirmed = true
+        v.type = .NotActive
+    }
+    if active_id != empty_id() {
+        active_trigger.confirmed = true
+        box.sm_set(&ui.cache.prevTriggers, active_id, active_trigger)
+    }
     ui.stackSize -= 1
     assert(ui.stackSize == 0)
 }
@@ -407,20 +435,26 @@ trigger_ :: proc(
     id: Uniquifier, 
 ) -> (TriggerType, Bounds) {
     id := UI_ID { uniquifier = id, loc = loc }
+    prevTrigger := box.sm_get(&ui.cache.prevTriggers, id)
     bounds := ui.boundsStack[ui.stackSize-1]
+    triggerType: TriggerType = .NotActive
     if within_bounds(bounds, ui.inputState.mousePos) {
         ui.activeId = id
-        if is_left_button_pressed(ui.frameContext) {
-            if .Update not_in ui.behaviour { return .Up, bounds }
-            return .Clicked, bounds
-        } else if is_left_button_held(ui.frameContext) {
-            return .Down, bounds
+        triggerType =  is_left_button_held(ui.frameContext) ? .Down : .Up
+
+        if is_left_button_pressed(ui.frameContext) && .Update in ui.behaviour {
+            triggerType = .Clicked
         }
-        return .Up, bounds
     } else if ui.activeId == id {
         ui.activeId = empty_id()
     }
-    return .NotActive, bounds
+    box.sm_set(&ui.cache.prevTriggers, id, Trigger {
+        type = triggerType,
+        depth = ui.stackSize,
+        bounds = bounds,
+        confirmed = false,
+    })
+    return prevTrigger.type, prevTrigger.bounds
 }
 
 button :: proc(
@@ -541,7 +575,6 @@ toggle :: proc(
     trigger, bounds := trigger_(ui, loc, id)
     color := toggled ? utils.blend_two_colors(on_color, rl.WHITE, 0.50) : utils.blend_two_colors(off_color, rl.WHITE, 0.50)
     fill_rect(ui, color, bounds)
-    within := within_bounds(bounds, ui.inputState.mousePos)
-    if within { outline_rect(ui, rl.BLACK, bounds) }
-    return within && is_left_button_pressed(ui.frameContext) && .Update in ui.frameContext.behaviour
+    if trigger != .NotActive { outline_rect(ui, rl.BLACK, bounds) }
+    return trigger == .Clicked
 }

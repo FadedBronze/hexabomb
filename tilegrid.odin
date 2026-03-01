@@ -205,12 +205,6 @@ get_active_tile :: proc(tilegrid: ^TileGrid, player: ^Player) -> (^Tile, HalfGri
 }
 
 hover_tilegrid :: proc(tileGrid: ^TileGrid, player: ^Player) {
-    type, bounds := ui.trigger()
-
-    if type == .NotActive {
-        return
-    }
-
     halfgrid := get_tile_grid_pos(tileGrid, player.inputState.mousePos)
     
     if player.editMode == .Clicking {

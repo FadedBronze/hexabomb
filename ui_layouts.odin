@@ -402,7 +402,7 @@ game_selector :: proc(game: ^Game, player: ^Player) {
     rl.DrawCircle(i32(player.inputState.mousePos.x), i32(player.inputState.mousePos.y), 12, rl.BLACK)
 }
 
-render_modifier_toggle :: proc(modifiers: ^bit_set[$T], names: [T]string, mode: T) {
+render_modifier_toggle :: proc(modifiers: ^bit_set[$T], names: [T]string, mode: T, loc := #caller_location) {
     buf: [32]u8
     str := strings.unsafe_string_to_cstring(utils.concatenate(buf[:], names[mode], "\x00")) 
     text_size := f32(rl.MeasureText(str, 22))
@@ -417,7 +417,7 @@ render_modifier_toggle :: proc(modifiers: ^bit_set[$T], names: [T]string, mode: 
 
     ui.add_bounds({30, 30})
     selected := mode in modifiers
-    if ui.toggle(rl.BLACK, rl.GRAY, selected, id=u64(mode)) {
+    if ui.toggle(rl.BLACK, rl.GRAY, selected, id=names[mode], loc = loc) {
         if selected {
             modifiers^ -= {mode}
         } else {
