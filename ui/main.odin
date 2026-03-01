@@ -594,6 +594,9 @@ draw_text :: proc(
     ui: ^UI, text: string, colour: rl.Color, 
     bounds: Bounds, size: int
 ) {
+    if .Draw not_in ui.behaviour {
+        return
+    }
     buf: [64]u8
     str := strings.unsafe_string_to_cstring(utils.concatenate(buf[:], text, "\x00"))
     text_width := rl.MeasureText(str, i32(size))
