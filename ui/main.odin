@@ -182,7 +182,8 @@ Bounds :: struct {
 
 InputMode :: enum {
     Keyboard,
-    Mouse
+    Mouse,
+    CapturedKeyboard,
 }
 
 UI :: struct {
@@ -264,7 +265,7 @@ end_ui :: proc(ui := ui_handle) {
     if !mouse_pos_unchanged(ui.frameContext) {
         ui.inputMode = .Mouse
     } 
-    if any_button_pressed(ui.frameContext, .W, .A, .S, .D) {
+    if any_button_pressed(ui.frameContext, .W, .A, .S, .D) && ui.inputMode != .CapturedKeyboard {
         ui.inputMode = .Keyboard
     }
     smi_ := box.sm_iterator(&ui_handle.cache.prevTriggers)
@@ -275,6 +276,7 @@ end_ui :: proc(ui := ui_handle) {
         }
     }
     switch ui.inputMode {
+    case .CapturedKeyboard:
     case .Keyboard:
         best_trigger: Trigger
         best_trigger.bounds.x = 10000
@@ -305,7 +307,6 @@ end_ui :: proc(ui := ui_handle) {
         if best_trigger_id != empty_id() {
             ui.cursorLocation = centerpoint(best_trigger.bounds)
         }
-        fmt.println(ui.cursorLocation)
     case .Mouse:
         ui.cursorLocation = ui.inputState.mousePos
     }
@@ -336,6 +337,14 @@ end_ui :: proc(ui := ui_handle) {
     }
     ui.stackSize -= 1
     assert(ui.stackSize == 0)
+}
+
+capture_key_input :: proc(ui := ui_handle) {
+    ui.inputMode = .CapturedKeyboard
+}
+
+exit_capture_key_input :: proc(ui := ui_handle) {
+    ui.inputMode = .Keyboard
 }
 
 add_bounds :: proc(bounds: la.Vector2f32 = {1, 1}, ui := ui_handle) {

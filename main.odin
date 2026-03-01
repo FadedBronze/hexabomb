@@ -399,6 +399,12 @@ update_game :: proc(game: ^Game, dt: f32, currentPlayerIndex: u8) {
         ui_layout(game, currentPlayerIndex)
 
         if trigger_type != .NotActive {
+            if ui.is_button_pressed(player.frameContext, .Enter) {
+                ui.capture_key_input()
+            }
+            if ui.is_button_pressed(player.frameContext, .Backspace) {
+                ui.exit_capture_key_input()
+            }
             hover_tilegrid(&game.tileGrid, player)
         }    
     }
