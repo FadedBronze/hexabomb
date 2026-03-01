@@ -190,7 +190,7 @@ MouseState :: enum {
 
 InputState :: struct {
     mousePos: la.Vector2f32,
-screenSize: la.Vector2f32,
+    screenSize: la.Vector2f32,
     leftButton: MouseState,
 }
 

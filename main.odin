@@ -78,6 +78,7 @@ Player :: struct {
     editorStatsOpen: bool,
     selectedDefaultTileStats: DefaultTileStatsType,
     using frameContext: ^ui.FrameInfo,
+    ui_buffer: ui.UI,
 }
 
 TileTypeStat :: struct {
@@ -520,6 +521,8 @@ init_app :: proc(app: ^App, cliArgs: ^CLIArgs) {
     net.incrementFrameNumber(&app.network, &app.currentClientInputState)
 }
 
+import "core:fmt"
+
 update_app :: proc(app: ^App, dt: f32) {
     frameArena: vl.Arena
     
@@ -540,11 +543,6 @@ update_app :: proc(app: ^App, dt: f32) {
         app.currentClientInputState = ui.generate_random_input({920, 800})
     }
     
-    ui.begin_ui(&app.ui, { 
-        width = f32(rl.GetScreenWidth()), 
-        height = f32(rl.GetScreenHeight()) 
-    })
-
     switch app.state {
     case .Playing:
         if (!net.broadcast_input_state(&app.network)) {
@@ -561,7 +559,7 @@ update_app :: proc(app: ^App, dt: f32) {
         
         rl.BeginDrawing()
         rl.ClearBackground(rl.WHITE)
-        
+           
         if app.network.state == .Failed {
             app.state = .Connecting
         }
@@ -587,10 +585,22 @@ update_app :: proc(app: ^App, dt: f32) {
             if uptodate {
                 frameContext.behaviour += { .Update }
             }
-            
-            app.ui.frameContext = &frameContext
+
+            player.ui_buffer.frameContext = &frameContext
             player.frameContext = &frameContext
+
+            if frameContext.inputState.screenSize == {0, 0} {
+                continue
+            }
+
+            ui.begin_ui(&player.ui_buffer, { 
+                width = frameContext.inputState.screenSize.x, 
+                height = frameContext.inputState.screenSize.y 
+            })
+
             update_game(&app.gameInstance, dt, u8(i)) 
+            
+            ui.end_ui()
         }
 
         if uptodate {
@@ -601,6 +611,11 @@ update_app :: proc(app: ^App, dt: f32) {
     case .Connecting:
         rl.BeginDrawing()
         rl.ClearBackground(rl.WHITE)
+
+        ui.begin_ui(&app.ui, { 
+            width = app.currentClientInputState.screenSize.x, 
+            height = app.currentClientInputState.screenSize.y
+        })
 
         app.ui.frameContext = &ui.FrameInfo{
             inputState = app.currentClientInputState,
@@ -615,9 +630,9 @@ update_app :: proc(app: ^App, dt: f32) {
             app.state = .Playing
             init_game(app)
         }
-    }
-    
-    ui.end_ui()
+
+        ui.end_ui()
+    }    
 
     app.lastClientInputState = app.currentClientInputState
 }
