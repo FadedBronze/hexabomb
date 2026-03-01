@@ -3,7 +3,6 @@ import rl "vendor:raylib"
 import rn "base:runtime"
 import la "core:math/linalg"
 import strings "core:strings"
-import "core:math/rand"
 import "../utils"
 import "core:fmt"
 import box "../containers"
@@ -192,15 +191,22 @@ UI :: struct {
     using frameContext: ^FrameInfo,
 }
 
-MouseState :: enum {
-    Up,
-    Down,
+InputKey :: enum {
+    leftMouseButton,
+    W,
+    A,
+    S,
+    D,
+    Q,
+    E,
+    Enter,
+    Backspace,
 }
 
 InputState :: struct {
     mousePos: la.Vector2f32,
     screenSize: la.Vector2f32,
-    leftButton: MouseState,
+    down: bit_set[InputKey]
 }
 
 FrameBehaviour :: bit_set [enum {
@@ -404,12 +410,15 @@ pop_layout :: proc(ui := ui_handle) {
     ui.layoutStack[ui.stackSize-1] = nil
 }
 
-is_left_button_pressed :: proc(frameContext: ^FrameInfo) -> bool {
-    return frameContext.inputState.leftButton == .Down && frameContext.lastInputState.leftButton == .Up
+is_button_held :: proc(frameContext: ^FrameInfo, key: InputKey) -> bool {
+    return key in frameContext.inputState.down
 }
 
-is_left_button_held :: proc(frameContext: ^FrameInfo) -> bool {
-    return frameContext.inputState.leftButton == .Down
+is_button_pressed :: proc(frameContext: ^FrameInfo, key: InputKey) -> bool {
+    if .Update not_in frameContext.behaviour {
+        return false
+    }
+    return key in frameContext.inputState.down && key not_in frameContext.lastInputState.down
 }
 
 TriggerType :: enum {
@@ -440,9 +449,9 @@ trigger_ :: proc(
     triggerType: TriggerType = .NotActive
     if within_bounds(bounds, ui.inputState.mousePos) {
         ui.activeId = id
-        triggerType =  is_left_button_held(ui.frameContext) ? .Down : .Up
+        triggerType = is_button_held(ui.frameContext, .leftMouseButton) ? .Down : .Up
 
-        if is_left_button_pressed(ui.frameContext) && .Update in ui.behaviour {
+        if is_button_pressed(ui.frameContext, .leftMouseButton) && .Update in ui.behaviour {
             triggerType = .Clicked
         }
     } else if ui.activeId == id {
@@ -520,29 +529,26 @@ text_display :: proc(
 
 empty_id :: proc() -> UI_ID { return UI_ID {} }
 
-get_button_state :: proc() -> MouseState {
-    if rl.IsMouseButtonDown(.LEFT) { return .Down }
-    if rl.IsMouseButtonUp(.LEFT) { return .Up }
-    unreachable()
+get_button_state :: proc() -> bit_set[InputKey] {
+    res: bit_set[InputKey] = {}
+    if rl.IsMouseButtonDown(.LEFT) { res += { .leftMouseButton } }
+    if rl.IsKeyDown(.W) { res += { .W } }
+    if rl.IsKeyDown(.A) { res += { .A } }
+    if rl.IsKeyDown(.S) { res += { .S } }
+    if rl.IsKeyDown(.D) { res += { .D } }
+    if rl.IsKeyDown(.Q) { res += { .Q } }
+    if rl.IsKeyDown(.E) { res += { .E } }
+    if rl.IsKeyDown(.ENTER) { res += { .Enter } }
+    if rl.IsKeyDown(.BACKSPACE) { res += { .Backspace } }
+    return res
 }
 
 get_input_state :: proc() -> InputState {
     screenSize := la.Vector2f32{f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())}
     return InputState {
         mousePos = rl.GetMousePosition(),
-        leftButton = get_button_state(),
+        down = get_button_state(),
         screenSize = screenSize,
-    }
-}
-
-generate_random_input :: proc(screenSize: [2]f32) -> InputState {
-    return InputState {
-        mousePos = {
-            screenSize.x * rand.float32(),
-            screenSize.y * rand.float32(),
-        },
-        screenSize = screenSize,
-        leftButton = MouseState(rand.float32() * f32(max(MouseState))+1)
     }
 }
 

@@ -412,8 +412,6 @@ AppState :: enum {
 App :: struct {
     state: AppState,
     
-    fuzzInputTest: bool,
-
     gameStartTime: time.Time,
     currentClientInputState: ui.InputState,    
     lastClientInputState: ui.InputState,    
@@ -526,8 +524,6 @@ init_app :: proc(app: ^App, cliArgs: ^CLIArgs) {
     net.incrementFrameNumber(&app.network, &app.currentClientInputState)
 }
 
-import "core:fmt"
-
 update_app :: proc(app: ^App, dt: f32) {
     frameArena: vl.Arena
     
@@ -542,12 +538,6 @@ update_app :: proc(app: ^App, dt: f32) {
     
     app.currentClientInputState = ui.get_input_state()
 
-    app.fuzzInputTest = rl.IsKeyPressed(.T) ? !app.fuzzInputTest : app.fuzzInputTest
-
-    if app.fuzzInputTest {
-        app.currentClientInputState = ui.generate_random_input({920, 800})
-    }
-    
     switch app.state {
     case .Playing:
         if (!net.broadcast_input_state(&app.network)) {

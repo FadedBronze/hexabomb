@@ -307,7 +307,7 @@ next_to_own_territory :: proc(game: ^Game, currentPlayerIndex: u8, halfGridPos: 
 place_tile_editor :: proc(game: ^Game, currentPlayerIndex: u8) {
     player := &game.players[currentPlayerIndex]
 
-    if !ui.is_left_button_pressed(player.frameContext) {
+    if !ui.is_button_pressed(player.frameContext, .leftMouseButton) {
         return
     }
 
@@ -484,7 +484,7 @@ create_tile :: proc(game: ^Game, editingPlayerIdx: u8, playerId: u8, halfGridPos
 place_tile_game :: proc(game: ^Game, currentPlayerIndex: u8) {
     player := &game.players[currentPlayerIndex]
 
-    if !ui.is_left_button_pressed(player.frameContext) {
+    if !ui.is_button_pressed(player.frameContext, .leftMouseButton) {
         return
     }
 
@@ -531,7 +531,7 @@ click_tile :: proc(game: ^Game, editingPlayerIndex: u8, playerId: u8) {
         return
     }
 
-    if ui.is_left_button_pressed(player.frameContext) {
+    if ui.is_button_pressed(player.frameContext, .leftMouseButton) {
         if rl.IsKeyDown(.LEFT_SHIFT) {
             log.msg("debug", hovered_tile)
         }
