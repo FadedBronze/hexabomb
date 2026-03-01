@@ -321,7 +321,7 @@ game_selector_maps :: proc(game: ^Game, player: ^Player) {
         mapname := transmute(string)mapname[:]
 
         ui.add_bounds(button_bounds)
-        if (ui.button(mapname, rl.GRAY)) {
+        if (ui.button(mapname, rl.GRAY, id=mapname)) {
             buf: [32]u8
             path := utils.concatenate(buf[:], "./maps/", mapname)
 

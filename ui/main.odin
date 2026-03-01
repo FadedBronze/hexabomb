@@ -180,8 +180,16 @@ Bounds :: struct {
     using rect: rl.Rectangle
 }
 
+InputMode :: enum {
+    Keyboard,
+    Mouse
+}
+
 UI :: struct {
     activeId: UI_ID,
+    selectedBounds: Bounds,
+    inputMode: InputMode,
+    cursorLocation: la.Vector2f32,
 
     boundsStack: [MAX_LAYOUT_STACK]Bounds,
     layoutStack: [MAX_LAYOUT_STACK]Layout,
@@ -218,6 +226,10 @@ within_bounds :: proc(rect: rl.Rectangle, pos: la.Vector2f32) -> bool {
     return pos.x < rect.x + rect.width && pos.x > rect.x && pos.y < rect.y + rect.height && pos.y > rect.y
 }
 
+centerpoint :: proc(bounds: Bounds) -> la.Vector2f32 {
+    return {bounds.x + bounds.width/2, bounds.y + bounds.height/2}
+}
+
 begin_ui :: proc(ui_ptr: ^UI, bounds: Bounds) {
     assert(ui_ptr != nil)
     ui_handle = ui_ptr
@@ -226,25 +238,101 @@ begin_ui :: proc(ui_ptr: ^UI, bounds: Bounds) {
     ui_handle.stackSize += 1
 }
 
+mouse_pos_unchanged :: proc(frameContext: ^FrameInfo) -> bool {
+    return frameContext.lastInputState.mousePos == frameContext.inputState.mousePos
+}
+
+any_button_pressed :: proc(frameContext: ^FrameInfo, buttons: ..InputKey) -> bool {
+    for button in buttons {
+        if is_button_pressed(frameContext, button) {
+            return true
+        }
+    }
+    return false
+}
+
+any_button_held :: proc(frameContext: ^FrameInfo, buttons: ..InputKey) -> bool {
+    for button in buttons {
+        if is_button_held(frameContext, button) {
+            return true
+        }
+    }
+    return false
+}
+
 end_ui :: proc(ui := ui_handle) {
+    if !mouse_pos_unchanged(ui.frameContext) {
+        ui.inputMode = .Mouse
+    } 
+    if any_button_pressed(ui.frameContext, .W, .A, .S, .D) {
+        ui.inputMode = .Keyboard
+    }
+    smi_ := box.sm_iterator(&ui_handle.cache.prevTriggers)
+    for id, trigger in box.sm_iterate(&smi_) {
+        if trigger.confirmed {
+            box.sm_remove(&smi_)
+            continue
+        }
+    }
+    switch ui.inputMode {
+    case .Keyboard:
+        best_trigger: Trigger
+        best_trigger.bounds.x = 10000
+        best_trigger.bounds.y = 10000
+        best_trigger_id: UI_ID
+        smi := box.sm_iterator(&ui_handle.cache.prevTriggers)
+        for id, trigger in box.sm_iterate(&smi) {
+            trigger_center := centerpoint(trigger.bounds)
+            delta := la.vector_length(trigger_center - ui.cursorLocation)
+            best_center := centerpoint(best_trigger.bounds)
+            bestDelta := la.vector_length(best_center - ui.cursorLocation)
+            if delta <= bestDelta && delta > 5 { 
+                if is_button_pressed(ui_handle.frameContext, .W) && trigger_center.y < ui.cursorLocation.y {
+                    best_trigger = trigger
+                    best_trigger_id = id
+                } else if is_button_pressed(ui_handle.frameContext, .S) && trigger_center.y > ui.cursorLocation.y {
+                    best_trigger = trigger
+                    best_trigger_id = id
+                } else if is_button_pressed(ui_handle.frameContext, .A) && trigger_center.x < ui.cursorLocation.x {
+                    best_trigger = trigger
+                    best_trigger_id = id
+                } else if is_button_pressed(ui_handle.frameContext, .D) && trigger_center.x > ui.cursorLocation.x {
+                    best_trigger = trigger
+                    best_trigger_id = id
+                }
+            }
+        }
+        if best_trigger_id != empty_id() {
+            ui.cursorLocation = centerpoint(best_trigger.bounds)
+        }
+        fmt.println(ui.cursorLocation)
+    case .Mouse:
+        ui.cursorLocation = ui.inputState.mousePos
+    }
     active_id := empty_id()
     active_trigger := Trigger{}
     smi := box.sm_iterator(&ui.cache.prevTriggers)
     for k, v in box.sm_iterate_ptr(&smi) {
-        if v.confirmed {
-            box.sm_remove(&smi)
-            continue
-        }
-        if v.type != .NotActive && v.depth > active_trigger.depth {
-            active_trigger = v^
-            active_id = k
+        if within_bounds(v.bounds, ui.cursorLocation) {
+            active_trigger.type = any_button_held(ui, .leftMouseButton, .Enter) ? .Down : .Up
+            if any_button_pressed(ui, .leftMouseButton, .Enter) {
+                active_trigger.type = .Clicked
+            }
+            if v.depth > active_trigger.depth {
+                active_trigger.depth = v.depth
+                active_trigger.bounds = v.bounds
+                active_trigger.confirmed = true
+                active_id = k
+            }
         }
         v.confirmed = true
         v.type = .NotActive
     }
     if active_id != empty_id() {
-        active_trigger.confirmed = true
         box.sm_set(&ui.cache.prevTriggers, active_id, active_trigger)
+        ui.activeId = active_id
+    } else {
+        ui.activeId = empty_id()
     }
     ui.stackSize -= 1
     assert(ui.stackSize == 0)
@@ -446,19 +534,8 @@ trigger_ :: proc(
     id := UI_ID { uniquifier = id, loc = loc }
     prevTrigger := box.sm_get(&ui.cache.prevTriggers, id)
     bounds := ui.boundsStack[ui.stackSize-1]
-    triggerType: TriggerType = .NotActive
-    if within_bounds(bounds, ui.inputState.mousePos) {
-        ui.activeId = id
-        triggerType = is_button_held(ui.frameContext, .leftMouseButton) ? .Down : .Up
-
-        if is_button_pressed(ui.frameContext, .leftMouseButton) && .Update in ui.behaviour {
-            triggerType = .Clicked
-        }
-    } else if ui.activeId == id {
-        ui.activeId = empty_id()
-    }
     box.sm_set(&ui.cache.prevTriggers, id, Trigger {
-        type = triggerType,
+        type = .NotActive,
         depth = ui.stackSize,
         bounds = bounds,
         confirmed = false,
@@ -496,7 +573,6 @@ button_base :: proc(
 ) -> TriggerType {
     trigger, bounds := trigger_(ui, loc, id)
     fill_rect(ui, utils.blend_two_colors(color, rl.WHITE, 0.50), bounds)
-    within_button := within_bounds(bounds, ui.frameContext.inputState.mousePos)
     if trigger == .Down { fill_rect(ui, utils.blend_two_colors(color, rl.WHITE, 0.66), bounds) }
     if trigger != .NotActive { outline_rect(ui, rl.BLACK, bounds) }
     if .Draw in ui.frameContext.behaviour { draw_text(ui, text, rl.BLACK, bounds, size) }
