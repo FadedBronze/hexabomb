@@ -142,7 +142,7 @@ broadcast_my_lobby_info :: proc(network: ^Network, target: net.Endpoint) {
         return
     }
 
-    broadcast_packet(network, packet, target = target)
+    broadcast_packet(network, packet, target)
 }
 
 broadcast_game_start :: proc(network: ^Network) -> bool {
@@ -177,7 +177,7 @@ broadcast_my_lobby_entry :: proc(network: ^Network) -> bool {
         return true
     }
     
-    broadcast_packet(network, packet)
+    broadcast_discovery_packet(network, packet)
 
     return true
 }

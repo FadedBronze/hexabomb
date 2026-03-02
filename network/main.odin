@@ -31,17 +31,16 @@ ThrottleInfo :: struct {
 }
 
 Network :: struct {
-    // Networking
+    // Ids
     mask: net.IP4_Address,
     discovery: net.UDP_Socket,
     socket: net.UDP_Socket,
+    myEndpoint: net.Endpoint,
 
     // Recieved State
     throttle_info: box.SmallMap(64, typeid, ThrottleInfo),
-
-    myEndpoint: net.Endpoint,
     
-    // Mode
+    // Flags
     singleMachineTesting: bool,    
     loggingEnabled: bool,
 
@@ -204,77 +203,18 @@ is_throttled :: proc(network: ^Network, T: typeid) -> bool {
     return true
 }
 
-recieve_discovery_messages :: proc(network: ^Network) -> bool {
-    buf: [256]u8
-    
-    for {
-        length, _, err := net.recv_udp(network.discovery, buf[:])
-
-        #partial switch err {
-        case .Connection_Refused:
-            continue
-        case .Would_Block:
-            return true
-        case nil:
-        case:
-            log.msg("error", err)
-            return false
-        }
-        
-        broadcast: DiscoveryPacket
-        {
-            err := cbor.unmarshal_from_bytes(buf[:], &broadcast, allocator = context.temp_allocator)
-            
-            if err != nil {
-                log.msg("error", err)
-                return false
-            }
-        }
-        
-        if network.loggingEnabled {
-            log.msg("network", "RECIEVED", broadcast)
-        }
-        
-        master := client_is_lobby_master(network)
-
-        #partial switch &v in &broadcast {
-        case BroadcastLobbyEntry:
-            if network.lobby_manager.state == .Connecting {
-                retrieve_lobby_entries(network, &v)
-            }
-        }
-    }
-
-    return true
-}
-
 recieve_messages :: proc(network: ^Network) -> bool {
-    buf: [512]u8
-
     for {
-        {
-            _, _, err := net.recv_udp(network.socket, buf[:])
-
-            if err == .Would_Block {
-                break
-            }
-
-            if err != nil {
-                log.msg("error", err)
-                return false
-            }
-        }
-        
         broadcast: Packet
-        {
-            err := cbor.unmarshal_from_bytes(buf[:], &broadcast, allocator = context.temp_allocator)
-
-            if err != nil {
+        err := poll_message(&broadcast, network)
+        switch err {
+            case nil:
+            case .Would_Block:
+                return true
+            case:
                 log.msg("error", err)
                 return false
-            }
         }
- 
         switch &b in broadcast {
         case InputPacket:
             handle_input_packet(network, &b)
@@ -282,17 +222,63 @@ recieve_messages :: proc(network: ^Network) -> bool {
             handle_lobby_packet(network, &b)
         }
     }
-
     return true
 }
 
-broadcast_packet :: proc(
+recieve_discovery_messages :: proc(network: ^Network) -> bool {
+    for {
+        broadcast: DiscoveryPacket
+        err := poll_discovery_message(&broadcast, network)
+        switch err {
+            case nil:
+            case .Would_Block:
+                return true
+            case:
+                log.msg("error", err)
+                return false
+        }
+        master := client_is_lobby_master(network)
+        switch &v in &broadcast {
+        case BroadcastLobbyEntry:
+            if network.lobby_manager.state == .Connecting {
+                retrieve_lobby_entries(network, &v)
+            }
+        }
+    }
+}
+
+PollErr :: union {
+    net.UDP_Recv_Error,
+    cbor.Unmarshal_Error,
+}
+
+poll_discovery_message :: proc(packet: ^$T, network: ^Network) -> PollErr {
+    return poll_message_(packet, network, network.discovery)
+}
+
+poll_message :: proc(packet: ^$T, network: ^Network) -> PollErr {
+    return poll_message_(packet, network, network.socket)
+}
+
+poll_message_ :: proc(packet: ^$T, network: ^Network, socket: net.UDP_Socket) -> (err: PollErr) {
+    buf: [1024]u8
+    
+    length, _ := net.recv_udp(socket, buf[:]) or_return
+
+    cbor.unmarshal_from_bytes(buf[:length], packet, allocator = context.temp_allocator) or_return
+    
+    if network.loggingEnabled {
+        log.msg("network", "RECIEVED", packet)
+    }
+    
+    return err
+}
+
+broadcast_discovery_packet :: proc(
     network: ^Network, 
     packet: any, 
-    target: net.Endpoint = {}
 ) -> bool {
-    discovery := target == {}
-    broadcast_msg := discovery ? "BROADCAST DISCOVERY" : "BROADCAST"
+    broadcast_msg := "BROADCAST DISCOVERY"
 
     if network.loggingEnabled {
         log.msg("network", broadcast_msg, packet)
@@ -305,24 +291,42 @@ broadcast_packet :: proc(
         return false
     }
 
-    if discovery {
-        broadcast := apply_subnet_mask(network.myEndpoint.address.(net.IP4_Address), network.mask)
+    broadcast := apply_subnet_mask(network.myEndpoint.address.(net.IP4_Address), network.mask)
 
-        for DISCOVERY_PORT in DISCOVERY_PORTS {
-            net.send_udp(network.discovery, payload, {
-                address = network.singleMachineTesting ? net.IP4_Address{127, 0, 0, 255} : broadcast,
-                port = DISCOVERY_PORT,
-            })
-        }
-
-    } else {
-        _, err := net.send_udp(network.socket, payload, target)
-
-        if err != nil {
-            log.msg("error", err)
-            return false
-        }       
+    for DISCOVERY_PORT in DISCOVERY_PORTS {
+        net.send_udp(network.discovery, payload, {
+            address = network.singleMachineTesting ? net.IP4_Address{127, 0, 0, 255} : broadcast,
+            port = DISCOVERY_PORT,
+        })
     }
+
+    return true
+}
+
+broadcast_packet :: proc(
+    network: ^Network, 
+    packet: any, 
+    target: net.Endpoint,
+) -> bool {
+    broadcast_msg := "BROADCAST"
+
+    if network.loggingEnabled {
+        log.msg("network", broadcast_msg, packet)
+    }
+
+    payload, err := cbor.marshal_into_bytes(packet, allocator = context.temp_allocator)
+
+    if err != nil {
+        log.msg("error", err)
+        return false
+    }
+
+    _, err_ := net.send_udp(network.socket, payload, target)
+
+    if err_ != nil {
+        log.msg("error", err_)
+        return false
+    }       
 
     return true
 }
