@@ -60,11 +60,6 @@ DiscoveryPacket :: union {
     BroadcastLobbyEntry
 }
 
-AllPackets :: union {
-    Packet,
-    DiscoveryPacket
-}
-
 Client :: struct {
     endpoint: net.Endpoint,
     name: string,
@@ -323,13 +318,13 @@ is_throttled :: proc(network: ^Network, T: typeid) -> bool {
 }
 
 request_join_lobby :: proc(network: ^Network, endpoint: net.Endpoint) -> bool {
-    packet := AllPackets(Packet(LobbyPacket(
+    packet := Packet(LobbyPacket(
         RequestLobbyJoin {
             endpoint = network.myEndpoint,
         }
-    )))
+    ))
 
-    return broadcast_packet(network, &packet, target = endpoint)
+    return broadcast_packet(network, packet, target = endpoint)
 }
 
 fmt_lobby_name :: proc(buf: []u8, lobby: ^LobbyEntry) -> string {
@@ -369,7 +364,7 @@ recieve_discovery_messages :: proc(network: ^Network) -> bool {
             return false
         }
         
-        broadcast: AllPackets
+        broadcast: DiscoveryPacket
         {
             err := cbor.unmarshal_from_bytes(buf[:], &broadcast, allocator = context.temp_allocator)
             
@@ -385,9 +380,7 @@ recieve_discovery_messages :: proc(network: ^Network) -> bool {
         
         master := client_is_lobby_master(network)
 
-        dbroadcast := broadcast.(DiscoveryPacket)
-
-        #partial switch &v in &dbroadcast {
+        #partial switch &v in &broadcast {
         case BroadcastLobbyEntry:
             if network.state == .Connecting {
                 retrieve_lobby_entries(network, &v)
@@ -448,7 +441,7 @@ recieve_messages :: proc(network: ^Network) -> bool {
             }
         }
         
-        broadcast: AllPackets
+        broadcast: Packet
         {
             err := cbor.unmarshal_from_bytes(buf[:], &broadcast, allocator = context.temp_allocator)
 
@@ -460,9 +453,7 @@ recieve_messages :: proc(network: ^Network) -> bool {
 
         master := client_is_lobby_master(network)
         
-        sbroadcast := broadcast.(Packet)
-
-        switch &b in sbroadcast {
+        switch &b in broadcast {
         case InputPacket:
             switch &v in b {
             case NotifyRecievedInputFrame:
@@ -561,13 +552,13 @@ broadcast_input_state :: proc(network: ^Network) -> bool {
             continue
         }
 
-        packet := AllPackets(Packet(InputPacket(BroadcastInputFrame {
+        packet := Packet(InputPacket(BroadcastInputFrame {
             inputFrame = firstInput.inputFrame,
             endpoint = network.myEndpoint,
             frameNumber = firstInput.frameNumber,
-        })))
+        }))
         
-        broadcast_packet(network, &packet, network.lobby.clients[i].endpoint)
+        broadcast_packet(network, packet, network.lobby.clients[i].endpoint)
     }
 
     if u8(sentCount) == network.lobby.clientCount-1 {
@@ -580,26 +571,26 @@ broadcast_input_state :: proc(network: ^Network) -> bool {
 broadcast_my_lobby_info :: proc(network: ^Network, target: net.Endpoint) {
     assert(client_is_lobby_master(network))
 
-    packet := AllPackets(Packet(LobbyPacket(BroadcastLobbyInfo {
+    packet := Packet(LobbyPacket(BroadcastLobbyInfo {
         lobby = network.lobby,
-    })))
+    }))
     
     if is_throttled(network, BroadcastLobbyInfo) {
         return
     }
 
-    broadcast_packet(network, &packet, target = target)
+    broadcast_packet(network, packet, target = target)
 }
 
 broadcast_game_start :: proc(network: ^Network) -> bool {
-    packet := AllPackets(Packet(LobbyPacket(BroadcastLobbyStartGame {})))
+    packet := Packet(LobbyPacket(BroadcastLobbyStartGame {}))
 
     if is_throttled(network, BroadcastLobbyStartGame) {
         return true
     }
     
     for i in 0..<network.lobby.clientCount {
-        broadcast_packet(network, &packet, network.lobby.clients[i].endpoint) or_return
+        broadcast_packet(network, packet, network.lobby.clients[i].endpoint) or_return
     }
 
     return true
@@ -609,25 +600,25 @@ broadcast_my_lobby_entry :: proc(network: ^Network) -> bool {
     assert(network.lobby.clientCount != 0)
     assert(client_is_lobby_master(network))
 
-    packet := AllPackets(DiscoveryPacket(BroadcastLobbyEntry {
+    packet := DiscoveryPacket(BroadcastLobbyEntry {
         entry = LobbyEntry {
             endpoint = network.myEndpoint,
             name = network.lobby.name,
         }
-    }))
+    })
 
     if is_throttled(network, BroadcastLobbyEntry) {
         return true
     }
     
-    broadcast_packet(network, &packet)
+    broadcast_packet(network, packet)
 
     return true
 }
 
 broadcast_packet :: proc(
     network: ^Network, 
-    packet: ^AllPackets, 
+    packet: any, 
     target: net.Endpoint = {}
 ) -> bool {
     discovery := target == {}
