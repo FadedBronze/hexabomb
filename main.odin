@@ -453,7 +453,7 @@ App :: struct {
     currentClientInputState: ui.InputState,    
     lastClientInputState: ui.InputState,    
 
-    network: net.Network(ui.InputState),
+    network: net.Network,
     gameInstance: Game,
 
     playerNames: [MAX_PLAYERS]string,

@@ -29,8 +29,8 @@ BroadcastLobbyEntry :: struct {
 
 BroadcastLobbyStartGame :: struct {}
 
-BroadcastInputFrame :: struct($I: typeid) {
-    inputFrame: I,
+BroadcastInputFrame :: struct {
+    inputFrame: ui.InputState,
     frameNumber: u64,
     endpoint: net.Endpoint,
 }
@@ -46,22 +46,22 @@ LobbyPacket :: union {
     BroadcastLobbyInfo,
 }
 
-InputPacket :: union($InputFrame: typeid) {
+InputPacket :: union {
     NotifyRecievedInputFrame,
-    BroadcastInputFrame(InputFrame),
+    BroadcastInputFrame,
 }
 
-Packet :: union($I: typeid) {
+Packet :: union {
     LobbyPacket,
-    InputPacket(I),
+    InputPacket,
 }
 
 DiscoveryPacket :: union {
     BroadcastLobbyEntry
 }
 
-AllPackets :: union($T: typeid) {
-    Packet(T),
+AllPackets :: union {
+    Packet,
     DiscoveryPacket
 }
 
@@ -70,10 +70,10 @@ Client :: struct {
     name: string,
 }
 
-InputFrameSent :: struct($I: typeid) {
+InputFrameSent :: struct {
     sentTo: [MAX_CLIENTS]bool,
     frameNumber: u64,
-    inputFrame: I,
+    inputFrame: ui.InputState,
 }
 
 Lobby :: struct {
@@ -101,11 +101,13 @@ ThrottleInfo :: struct {
     delay_ms: u16,
 }
 
-Network :: struct($I: typeid) {
+import "../ui"
+
+Network :: struct {
     // UI
     state: NetworkState,
-    currentInputFrameState: I,
-    lastInputFrameState: I,
+    currentInputFrameState: ui.InputState,
+    lastInputFrameState: ui.InputState,
 
     // Networking
     mask: net.IP4_Address,
@@ -120,10 +122,10 @@ Network :: struct($I: typeid) {
     lobby: Lobby,
     myEndpoint: net.Endpoint,
     
-    inputQueue: queue.Queue(InputFrameSent(I)),
+    inputQueue: queue.Queue(InputFrameSent),
 
-    prevInputFrames: [MAX_CLIENTS]I,
-    inputFrames: [MAX_CLIENTS]I,
+    prevInputFrames: [MAX_CLIENTS]ui.InputState,
+    inputFrames: [MAX_CLIENTS]ui.InputState,
     currentInputFrameNumbers: [MAX_CLIENTS]u64,
 
     inputFrameCount: u64,
@@ -190,7 +192,7 @@ find_device_ip :: proc(testing: bool) -> net.IP4_Address {
     return addr
 }
 
-find_available_discovery_port :: proc(network: ^Network($I)) -> (ok: bool, discoveryPort: int, discovery: net.UDP_Socket) {
+find_available_discovery_port :: proc(network: ^Network) -> (ok: bool, discoveryPort: int, discovery: net.UDP_Socket) {
     err2: net.Network_Error
 
     for DISCOVERY_PORT in DISCOVERY_PORTS[:] {
@@ -218,7 +220,7 @@ find_available_discovery_port :: proc(network: ^Network($I)) -> (ok: bool, disco
     return ok, discoveryPort, discovery
 }
 
-init :: proc(network: ^Network($T), port: int, singleMachineTesting: bool) -> (success: bool) { 
+init :: proc(network: ^Network, port: int, singleMachineTesting: bool) -> (success: bool) { 
     network.singleMachineTesting = singleMachineTesting
     addr := net.IP4_Loopback
     
@@ -268,7 +270,7 @@ init :: proc(network: ^Network($T), port: int, singleMachineTesting: bool) -> (s
     return true
 }
 
-create_local_lobby :: proc(network: ^Network($I), name: string) {
+create_local_lobby :: proc(network: ^Network, name: string) {
     network.lobby = Lobby {
         creatorIdx = 0,
         clientCount = 1,
@@ -280,17 +282,17 @@ create_local_lobby :: proc(network: ^Network($I), name: string) {
     }
 }
 
-create_lobby :: proc(network: ^Network($I), name: string) {
+create_lobby :: proc(network: ^Network, name: string) {
     create_local_lobby(network, name)
     broadcast_my_lobby_entry(network)
 }
 
-get_client_player_idx :: proc(network: ^Network($I)) -> u8 {
+get_client_player_idx :: proc(network: ^Network) -> u8 {
     assert(network.lobby.clientCount != 0)
     return get_endpoint_player_idx(network, network.myEndpoint)
 }
 
-get_endpoint_player_idx :: proc(network: ^Network($I), endpoint: net.Endpoint) -> u8 {
+get_endpoint_player_idx :: proc(network: ^Network, endpoint: net.Endpoint) -> u8 {
     for client, i in network.lobby.clients[:network.lobby.clientCount] {
         if client.endpoint == endpoint {
             return u8(i)
@@ -308,7 +310,7 @@ apply_subnet_mask :: proc(ip: net.IP4_Address, mask: net.IP4_Address) -> net.IP4
     return broadcast
 }
 
-is_throttled :: proc(network: ^Network($I), T: typeid) -> bool {
+is_throttled :: proc(network: ^Network, T: typeid) -> bool {
     now := time.now()
 
     info := box.sm_get_ptr(&network.throttle_info, T)
@@ -320,8 +322,8 @@ is_throttled :: proc(network: ^Network($I), T: typeid) -> bool {
     return true
 }
 
-request_join_lobby :: proc(network: ^Network($I), endpoint: net.Endpoint) -> bool {
-    packet := AllPackets(I)(Packet(I)(LobbyPacket(
+request_join_lobby :: proc(network: ^Network, endpoint: net.Endpoint) -> bool {
+    packet := AllPackets(Packet(LobbyPacket(
         RequestLobbyJoin {
             endpoint = network.myEndpoint,
         }
@@ -334,11 +336,11 @@ fmt_lobby_name :: proc(buf: []u8, lobby: ^LobbyEntry) -> string {
     return utils.concatenate(buf[:], net.endpoint_to_string(lobby.endpoint), " | ", lobby.name)
 }
 
-client_is_lobby_master :: proc(network: ^Network($I)) -> bool {
+client_is_lobby_master :: proc(network: ^Network) -> bool {
     return network.lobby.clients[network.lobby.creatorIdx].endpoint == network.myEndpoint
 }
 
-retrieve_lobby_entries :: proc(network: ^Network($I), broadcast: ^BroadcastLobbyEntry) {
+retrieve_lobby_entries :: proc(network: ^Network, broadcast: ^BroadcastLobbyEntry) {
     for i in 0..<network.lobbyEntries.len {
         lobbyEntry := network.lobbyEntries.data[i]
 
@@ -350,7 +352,7 @@ retrieve_lobby_entries :: proc(network: ^Network($I), broadcast: ^BroadcastLobby
     sm.append_elem(&network.lobbyEntries, broadcast.entry)
 }
 
-recieve_discovery_messages :: proc(network: ^Network($I)) -> bool {
+recieve_discovery_messages :: proc(network: ^Network) -> bool {
     buf: [256]u8
     
     for {
@@ -367,7 +369,7 @@ recieve_discovery_messages :: proc(network: ^Network($I)) -> bool {
             return false
         }
         
-        broadcast: AllPackets(I)
+        broadcast: AllPackets
         {
             err := cbor.unmarshal_from_bytes(buf[:], &broadcast, allocator = context.temp_allocator)
             
@@ -396,12 +398,12 @@ recieve_discovery_messages :: proc(network: ^Network($I)) -> bool {
     return true
 }
 
-accept_lobby_info :: proc(network: ^Network($I), broadcast: ^BroadcastLobbyInfo) {
+accept_lobby_info :: proc(network: ^Network, broadcast: ^BroadcastLobbyInfo) {
     network.lobby = broadcast.lobby
     network.state = .InLobby
 }
 
-accept_join_lobby :: proc(network: ^Network($I), broadcast: ^RequestLobbyJoin) {
+accept_join_lobby :: proc(network: ^Network, broadcast: ^RequestLobbyJoin) {
     network.lobby.clients[network.lobby.clientCount] = Client {
         endpoint = broadcast.endpoint,
     }
@@ -411,7 +413,7 @@ accept_join_lobby :: proc(network: ^Network($I), broadcast: ^RequestLobbyJoin) {
     broadcast_my_lobby_info(network, broadcast.endpoint)
 }
 
-all_inputs_uptodate :: proc(network: ^Network($I)) -> bool {
+all_inputs_uptodate :: proc(network: ^Network) -> bool {
     if network.inputQueue.len != 0 {
         return false
     }
@@ -429,7 +431,7 @@ all_inputs_uptodate :: proc(network: ^Network($I)) -> bool {
     return true
 }
 
-recieve_messages :: proc(network: ^Network($I)) -> bool {
+recieve_messages :: proc(network: ^Network) -> bool {
     buf: [256]u8
 
     for {
@@ -446,7 +448,7 @@ recieve_messages :: proc(network: ^Network($I)) -> bool {
             }
         }
         
-        broadcast: AllPackets(I)
+        broadcast: AllPackets
         {
             err := cbor.unmarshal_from_bytes(buf[:], &broadcast, allocator = context.temp_allocator)
 
@@ -458,14 +460,14 @@ recieve_messages :: proc(network: ^Network($I)) -> bool {
 
         master := client_is_lobby_master(network)
         
-        sbroadcast := broadcast.(Packet(I))
+        sbroadcast := broadcast.(Packet)
 
         switch &b in sbroadcast {
-        case InputPacket(I):
+        case InputPacket:
             switch &v in b {
             case NotifyRecievedInputFrame:
                 recieve_input_recieved_broadcast(network, &v)
-            case BroadcastInputFrame(I):
+            case BroadcastInputFrame:
                 recieve_input_state(network, &v)
             }
         case LobbyPacket:
@@ -489,7 +491,7 @@ recieve_messages :: proc(network: ^Network($I)) -> bool {
     return true
 }
 
-recieve_input_state :: proc(network: ^Network($I), broadcastInputFrame: ^BroadcastInputFrame(I)) {
+recieve_input_state :: proc(network: ^Network, broadcastInputFrame: ^BroadcastInputFrame) {
     idx := get_endpoint_player_idx(network, broadcastInputFrame.endpoint)
 
     currentFrameNumber := network.inputFrameCount
@@ -515,7 +517,7 @@ recieve_input_state :: proc(network: ^Network($I), broadcastInputFrame: ^Broadca
     broadcast_recieved_input_state(network, broadcastInputFrame.frameNumber, broadcastInputFrame.endpoint)
 }
 
-recieve_input_recieved_broadcast :: proc(network: ^Network($I), broadcast: ^NotifyRecievedInputFrame) {
+recieve_input_recieved_broadcast :: proc(network: ^Network, broadcast: ^NotifyRecievedInputFrame) {
     if network.inputQueue.len == 0 {
         return
     }
@@ -532,10 +534,10 @@ recieve_input_recieved_broadcast :: proc(network: ^Network($I), broadcast: ^Noti
     firstInput.sentTo[idx] = true
 }
 
-broadcast_input_state :: proc(network: ^Network($I)) -> bool {
+broadcast_input_state :: proc(network: ^Network) -> bool {
     q := &network.inputQueue
 
-    if is_throttled(network, BroadcastInputFrame(I)) {
+    if is_throttled(network, BroadcastInputFrame) {
         return true
     }
     
@@ -559,7 +561,7 @@ broadcast_input_state :: proc(network: ^Network($I)) -> bool {
             continue
         }
 
-        packet := AllPackets(I)(Packet(I)(InputPacket(I)(BroadcastInputFrame(I) {
+        packet := AllPackets(Packet(InputPacket(BroadcastInputFrame {
             inputFrame = firstInput.inputFrame,
             endpoint = network.myEndpoint,
             frameNumber = firstInput.frameNumber,
@@ -575,10 +577,10 @@ broadcast_input_state :: proc(network: ^Network($I)) -> bool {
     return true
 }
 
-broadcast_my_lobby_info :: proc(network: ^Network($I), target: net.Endpoint) {
+broadcast_my_lobby_info :: proc(network: ^Network, target: net.Endpoint) {
     assert(client_is_lobby_master(network))
 
-    packet := AllPackets(I)(Packet(I)(LobbyPacket(BroadcastLobbyInfo {
+    packet := AllPackets(Packet(LobbyPacket(BroadcastLobbyInfo {
         lobby = network.lobby,
     })))
     
@@ -589,8 +591,8 @@ broadcast_my_lobby_info :: proc(network: ^Network($I), target: net.Endpoint) {
     broadcast_packet(network, &packet, target = target)
 }
 
-broadcast_game_start :: proc(network: ^Network($I)) -> bool {
-    packet := AllPackets(I)(Packet(I)(LobbyPacket(BroadcastLobbyStartGame {})))
+broadcast_game_start :: proc(network: ^Network) -> bool {
+    packet := AllPackets(Packet(LobbyPacket(BroadcastLobbyStartGame {})))
 
     if is_throttled(network, BroadcastLobbyStartGame) {
         return true
@@ -603,11 +605,11 @@ broadcast_game_start :: proc(network: ^Network($I)) -> bool {
     return true
 }
 
-broadcast_my_lobby_entry :: proc(network: ^Network($I)) -> bool {
+broadcast_my_lobby_entry :: proc(network: ^Network) -> bool {
     assert(network.lobby.clientCount != 0)
     assert(client_is_lobby_master(network))
 
-    packet := AllPackets(I)(DiscoveryPacket(BroadcastLobbyEntry {
+    packet := AllPackets(DiscoveryPacket(BroadcastLobbyEntry {
         entry = LobbyEntry {
             endpoint = network.myEndpoint,
             name = network.lobby.name,
@@ -624,8 +626,8 @@ broadcast_my_lobby_entry :: proc(network: ^Network($I)) -> bool {
 }
 
 broadcast_packet :: proc(
-    network: ^Network($I), 
-    packet: ^AllPackets(I), 
+    network: ^Network, 
+    packet: ^AllPackets, 
     target: net.Endpoint = {}
 ) -> bool {
     discovery := target == {}
@@ -664,8 +666,8 @@ broadcast_packet :: proc(
     return true
 }
 
-broadcast_recieved_input_state :: proc(network: ^Network($I), frameNumber: u64, endpoint: net.Endpoint) -> bool {
-    packet := Packet(I)(InputPacket(I)(NotifyRecievedInputFrame {
+broadcast_recieved_input_state :: proc(network: ^Network, frameNumber: u64, endpoint: net.Endpoint) -> bool {
+    packet := Packet(InputPacket(NotifyRecievedInputFrame {
         frameNumber = frameNumber,
         endpoint = network.myEndpoint,
     }))
@@ -689,12 +691,12 @@ broadcast_recieved_input_state :: proc(network: ^Network($I), frameNumber: u64, 
     return true
 }
 
-incrementFrameNumber :: proc(network: ^Network($I), inputState: ^I) {
+incrementFrameNumber :: proc(network: ^Network, inputState: ^ui.InputState) {
     network.inputFrameCount += 1
     network.lastInputFrameState = network.currentInputFrameState
     network.currentInputFrameState = inputState^
 
-    queue.push_back(&network.inputQueue, InputFrameSent(I) {
+    queue.push_back(&network.inputQueue, InputFrameSent {
         inputFrame = network.currentInputFrameState,
         frameNumber = network.inputFrameCount,
         sentTo = {},
