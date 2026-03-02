@@ -76,7 +76,7 @@ msg :: proc(file: string, data: ..any, loc := #caller_location) {
 
     str := fmt.sbprintln(&sb, "[", t, "](", loc, ") ", data, sep = "")
 
-    if _logger.stdout && file == "error" {
+    if _logger.stdout {
         fmt.println(str)
     }
 

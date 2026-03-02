@@ -2,7 +2,6 @@ package network
 
 import "core:net"
 import "core:time"
-import "core:container/queue"
 import "core:encoding/cbor"
 import sm "core:container/small_array"
 import box "../containers"
@@ -29,17 +28,6 @@ BroadcastLobbyEntry :: struct {
 
 BroadcastLobbyStartGame :: struct {}
 
-BroadcastInputFrame :: struct {
-    inputFrame: ui.InputState,
-    frameNumber: u64,
-    endpoint: net.Endpoint,
-}
-
-NotifyRecievedInputFrame :: struct {
-    frameNumber: u64,
-    endpoint: net.Endpoint,
-}
-
 LobbyPacket :: union {
     BroadcastLobbyStartGame,
     RequestLobbyJoin,
@@ -63,12 +51,6 @@ DiscoveryPacket :: union {
 Client :: struct {
     endpoint: net.Endpoint,
     name: string,
-}
-
-InputFrameSent :: struct {
-    sentTo: [MAX_CLIENTS]bool,
-    frameNumber: u64,
-    inputFrame: ui.InputState,
 }
 
 Lobby :: struct {
@@ -96,13 +78,9 @@ ThrottleInfo :: struct {
     delay_ms: u16,
 }
 
-import "../ui"
-
 Network :: struct {
     // UI
     state: NetworkState,
-    currentInputFrameState: ui.InputState,
-    lastInputFrameState: ui.InputState,
 
     // Networking
     mask: net.IP4_Address,
@@ -117,17 +95,11 @@ Network :: struct {
     lobby: Lobby,
     myEndpoint: net.Endpoint,
     
-    inputQueue: queue.Queue(InputFrameSent),
-
-    prevInputFrames: [MAX_CLIENTS]ui.InputState,
-    inputFrames: [MAX_CLIENTS]ui.InputState,
-    currentInputFrameNumbers: [MAX_CLIENTS]u64,
-
-    inputFrameCount: u64,
-
     // Mode
     singleMachineTesting: bool,    
     loggingEnabled: bool,
+
+    input_sender: InputSender,
 }
 
 import vl "core:mem/virtual"
@@ -260,15 +232,13 @@ init :: proc(network: ^Network, port: int, singleMachineTesting: bool) -> (succe
     network.lobby = {}
     network.loggingEnabled = true
  
-    queue.init(&network.inputQueue)
-
     now := time.now()
     box.sm_set(&network.throttle_info, BroadcastLobbyEntry, ThrottleInfo{ now, 500 })
     box.sm_set(&network.throttle_info, BroadcastLobbyInfo, ThrottleInfo{ now, 0 })
     box.sm_set(&network.throttle_info, BroadcastLobbyStartGame, ThrottleInfo{ now, 0 })
     box.sm_set(&network.throttle_info, RequestLobbyJoin, ThrottleInfo{ now, 0 })
-    box.sm_set(&network.throttle_info, BroadcastInputFrame, ThrottleInfo{ now, 5 })
-    box.sm_set(&network.throttle_info, NotifyRecievedInputFrame, ThrottleInfo{ now, 5 })
+
+    init_input_send(network)
     
     return true
 }
@@ -417,24 +387,6 @@ accept_join_lobby :: proc(network: ^Network, broadcast: ^RequestLobbyJoin) {
     broadcast_my_lobby_info(network, broadcast.endpoint)
 }
 
-all_inputs_uptodate :: proc(network: ^Network) -> bool {
-    if network.inputQueue.len != 0 {
-        return false
-    }
-
-    for i in 0..<network.lobby.clientCount {
-        if i == get_client_player_idx(network) {
-            continue
-        }
-        
-        if network.currentInputFrameNumbers[i] != network.inputFrameCount {
-            return false
-        }
-    }
-
-    return true
-}
-
 recieve_messages :: proc(network: ^Network) -> bool {
     buf: [512]u8
 
@@ -489,92 +441,6 @@ recieve_messages :: proc(network: ^Network) -> bool {
             }
         }
     }
-
-    return true
-}
-
-recieve_input_state :: proc(network: ^Network, broadcastInputFrame: ^BroadcastInputFrame) {
-    idx := get_endpoint_player_idx(network, broadcastInputFrame.endpoint)
-
-    currentFrameNumber := network.inputFrameCount
-    newFrameNumber := broadcastInputFrame.frameNumber
-
-    if newFrameNumber == currentFrameNumber-1 {
-        log.msg("debug", newFrameNumber, currentFrameNumber)
-        broadcast_recieved_input_state(network, broadcastInputFrame.frameNumber, broadcastInputFrame.endpoint)
-    }
-    
-    if newFrameNumber != currentFrameNumber {
-        return
-    }
-
-    if network.currentInputFrameNumbers[idx] != network.inputFrameCount-1 {
-        return
-    }
-
-    network.prevInputFrames[idx] = network.inputFrames[idx]
-    network.inputFrames[idx] = broadcastInputFrame.inputFrame
-    network.currentInputFrameNumbers[idx] = broadcastInputFrame.frameNumber
-    
-    broadcast_recieved_input_state(network, broadcastInputFrame.frameNumber, broadcastInputFrame.endpoint)
-}
-
-recieve_input_recieved_broadcast :: proc(network: ^Network, broadcast: ^NotifyRecievedInputFrame) {
-    if network.inputQueue.len == 0 {
-        return
-    }
-
-    firstInput := queue.front_ptr(&network.inputQueue)
-    
-    log.msg("debug", firstInput.frameNumber, broadcast.frameNumber)
-
-    if firstInput.frameNumber != broadcast.frameNumber {
-        return
-    }
-
-    idx := get_endpoint_player_idx(network, broadcast.endpoint)
-    firstInput.sentTo[idx] = true
-}
-
-broadcast_input_state :: proc(network: ^Network) -> bool {
-    q := &network.inputQueue
-
-    if is_throttled(network, BroadcastInputFrame) {
-        return true
-    }
-    
-    if q.len == 0 {
-        return true
-    }
-
-    firstInput := queue.front_ptr(q)
-
-    sentCount := 0
-    
-    for i in 0..<network.lobby.clientCount {
-        if i == get_client_player_idx(network) {
-            continue
-        }
-
-        sent := firstInput.sentTo[i]
-
-        if sent {
-            sentCount += 1
-            continue
-        }
-
-        packet := Packet(InputPacket(BroadcastInputFrame {
-            inputFrame = firstInput.inputFrame,
-            endpoint = network.myEndpoint,
-            frameNumber = firstInput.frameNumber,
-        }))
-        
-        broadcast_packet(network, packet, network.lobby.clients[i].endpoint)
-    }
-
-    if u8(sentCount) == network.lobby.clientCount-1 {
-        queue.pop_front(&network.inputQueue)
-    }    
 
     return true
 }
@@ -691,16 +557,4 @@ broadcast_recieved_input_state :: proc(network: ^Network, frameNumber: u64, endp
     }
 
     return true
-}
-
-incrementFrameNumber :: proc(network: ^Network, inputState: ^ui.InputState) {
-    network.inputFrameCount += 1
-    network.lastInputFrameState = network.currentInputFrameState
-    network.currentInputFrameState = inputState^
-
-    queue.push_back(&network.inputQueue, InputFrameSent {
-        inputFrame = network.currentInputFrameState,
-        frameNumber = network.inputFrameCount,
-        sentTo = {},
-    })
 }

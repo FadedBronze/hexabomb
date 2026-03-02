@@ -558,7 +558,7 @@ init_app :: proc(app: ^App, cliArgs: ^CLIArgs) {
 
     play_audio("music.mp3")
     
-    net.incrementFrameNumber(&app.network, &app.currentClientInputState)
+    net.incrementFrameNumber(&app.network.input_sender, &app.currentClientInputState)
 }
 
 update_app :: proc(app: ^App, dt: f32) {
@@ -602,14 +602,14 @@ update_app :: proc(app: ^App, dt: f32) {
             
             if i != app.playerIndex {
                 frameContext = ui.FrameInfo {
-                    inputState = app.network.inputFrames[i],
-                    lastInputState = app.network.prevInputFrames[i],
+                    inputState = app.network.input_sender.inputFrames[i],
+                    lastInputState = app.network.input_sender.prevInputFrames[i],
                     behaviour = { }
                 }
             } else {
                 frameContext = ui.FrameInfo {
-                    inputState = app.network.currentInputFrameState,
-                    lastInputState = app.network.lastInputFrameState,
+                    inputState = app.network.input_sender.currentInputFrameState,
+                    lastInputState = app.network.input_sender.lastInputFrameState,
                     behaviour = { .Draw }
                 }    
             }
@@ -636,7 +636,7 @@ update_app :: proc(app: ^App, dt: f32) {
         }
 
         if uptodate {
-            net.incrementFrameNumber(&app.network, &app.currentClientInputState)
+            net.incrementFrameNumber(&app.network.input_sender, &app.currentClientInputState)
         }
 
         rl.EndDrawing()
@@ -654,7 +654,7 @@ update_app :: proc(app: ^App, dt: f32) {
             lastInputState = app.lastClientInputState,
             behaviour = { .Draw, .Update }
         }
-        update_network_interface(app)    
+        update_network_interface(app)
         
         rl.EndDrawing()
         
