@@ -465,18 +465,18 @@ App :: struct {
 }
 
 init_game :: proc(app: ^App) {
-    app.gameInstance.seed = u64(app.network.lobby.clients[app.network.lobby.creatorIdx].endpoint.port)
+    app.gameInstance.seed = u64(app.network.lobby_manager.lobby.clients[app.network.lobby_manager.lobby.creatorIdx].endpoint.port)
 
     app.gameInstance.map_random_context = rn.default_random_generator()
     rand.reset(app.gameInstance.seed, gen = app.gameInstance.map_random_context)
 
-    app.playerCount = app.network.lobby.clientCount
+    app.playerCount = app.network.lobby_manager.lobby.clientCount
     app.playerIndex = net.get_client_player_idx(&app.network)
 
     app.gameInstance.playerCount = app.playerCount
 
     for i in 0..<app.playerCount {
-        client := &app.network.lobby.clients[i]
+        client := &app.network.lobby_manager.lobby.clients[i]
         app.playerNames[i] = client.name
     }
 
@@ -578,12 +578,12 @@ update_app :: proc(app: ^App, dt: f32) {
     switch app.state {
     case .Playing:
         if (!net.broadcast_input_state(&app.network)) {
-            app.network.state = .Failed
+            app.network.lobby_manager.state = .Failed
             app.state = .Connecting
         }
 
         if (!net.recieve_messages(&app.network)) {
-            app.network.state = .Failed
+            app.network.lobby_manager.state = .Failed
             app.state = .Connecting
         } 
         
@@ -592,7 +592,7 @@ update_app :: proc(app: ^App, dt: f32) {
         rl.BeginDrawing()
         rl.ClearBackground(rl.WHITE)
            
-        if app.network.state == .Failed {
+        if app.network.lobby_manager.state == .Failed {
             app.state = .Connecting
         }
 
@@ -654,11 +654,11 @@ update_app :: proc(app: ^App, dt: f32) {
             lastInputState = app.lastClientInputState,
             behaviour = { .Draw, .Update }
         }
-        update_network_interface(app)
+        net.update_network_interface(&app.network)
         
         rl.EndDrawing()
         
-        if app.network.state == .Connected {
+        if app.network.lobby_manager.state == .Connected {
             app.state = .Playing
             init_game(app)
         }

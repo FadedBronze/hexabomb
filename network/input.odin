@@ -6,6 +6,7 @@ import box "../containers"
 import "core:time"
 import "core:net"
 import "../log"
+import "core:encoding/cbor"
 
 BroadcastInputFrame :: struct {
     inputFrame: ui.InputState,
@@ -51,7 +52,7 @@ all_inputs_uptodate :: proc(network: ^Network) -> bool {
         return false
     }
 
-    for i in 0..<network.lobby.clientCount {
+    for i in 0..<network.lobby_manager.lobby.clientCount {
         if i == get_client_player_idx(network) {
             continue
         }
@@ -127,7 +128,7 @@ broadcast_input_state :: proc(network: ^Network) -> bool {
 
     sentCount := 0
     
-    for i in 0..<network.lobby.clientCount {
+    for i in 0..<network.lobby_manager.lobby.clientCount {
         if i == get_client_player_idx(network) {
             continue
         }
@@ -145,10 +146,10 @@ broadcast_input_state :: proc(network: ^Network) -> bool {
             frameNumber = firstInput.frameNumber,
         }))
         
-        broadcast_packet(network, packet, network.lobby.clients[i].endpoint)
+        broadcast_packet(network, packet, network.lobby_manager.lobby.clients[i].endpoint)
     }
 
-    if u8(sentCount) == network.lobby.clientCount-1 {
+    if u8(sentCount) == network.lobby_manager.lobby.clientCount-1 {
         queue.pop_front(&input_sender.inputQueue)
     }    
 
@@ -165,4 +166,38 @@ incrementFrameNumber :: proc(input_sender: ^InputSender, inputState: ^ui.InputSt
         frameNumber = input_sender.inputFrameCount,
         sentTo = {},
     })
+}
+
+handle_input_packet :: proc(network: ^Network, b: ^InputPacket) {
+    switch &v in b {
+    case NotifyRecievedInputFrame:
+        recieve_input_recieved_broadcast(network, &v)
+    case BroadcastInputFrame:
+        recieve_input_state(network, &v)
+    }
+}
+
+broadcast_recieved_input_state :: proc(network: ^Network, frameNumber: u64, endpoint: net.Endpoint) -> bool {
+    packet := Packet(InputPacket(NotifyRecievedInputFrame {
+        frameNumber = frameNumber,
+        endpoint = network.myEndpoint,
+    }))
+
+    bytes, err := cbor.marshal_into_bytes(packet, allocator = context.temp_allocator)
+    
+    if err != nil {
+        log.msg("error", err)
+        return false
+    }
+
+    {
+        _, err := net.send_udp(network.socket, bytes, endpoint)
+
+        if err != nil {
+            log.msg("error", err)
+            return false
+        }
+    }
+
+    return true
 }
