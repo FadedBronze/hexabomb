@@ -7,7 +7,7 @@ import "core:encoding/cbor"
 import sm "core:container/small_array"
 import box "../containers"
 import "../utils/"
-
+import "core:strings"
 import "../log"
 
 MAX_LOBBIES :: 4
@@ -261,6 +261,14 @@ init :: proc(network: ^Network, port: int, singleMachineTesting: bool) -> (succe
     network.loggingEnabled = true
  
     queue.init(&network.inputQueue)
+
+    now := time.now()
+    box.sm_set(&network.throttle_info, BroadcastLobbyEntry, ThrottleInfo{ now, 500 })
+    box.sm_set(&network.throttle_info, BroadcastLobbyInfo, ThrottleInfo{ now, 0 })
+    box.sm_set(&network.throttle_info, BroadcastLobbyStartGame, ThrottleInfo{ now, 0 })
+    box.sm_set(&network.throttle_info, RequestLobbyJoin, ThrottleInfo{ now, 0 })
+    box.sm_set(&network.throttle_info, BroadcastInputFrame, ThrottleInfo{ now, 5 })
+    box.sm_set(&network.throttle_info, NotifyRecievedInputFrame, ThrottleInfo{ now, 5 })
     
     return true
 }
@@ -344,7 +352,10 @@ retrieve_lobby_entries :: proc(network: ^Network, broadcast: ^BroadcastLobbyEntr
         }
     }
 
-    sm.append_elem(&network.lobbyEntries, broadcast.entry)
+    entry := broadcast.entry
+    entry.name = strings.concatenate({entry.name})
+
+    sm.append_elem(&network.lobbyEntries, entry)
 }
 
 recieve_discovery_messages :: proc(network: ^Network) -> bool {
@@ -425,7 +436,7 @@ all_inputs_uptodate :: proc(network: ^Network) -> bool {
 }
 
 recieve_messages :: proc(network: ^Network) -> bool {
-    buf: [256]u8
+    buf: [512]u8
 
     for {
         {

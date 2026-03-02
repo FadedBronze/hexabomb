@@ -512,7 +512,7 @@ update_network_interface :: proc(app: ^App) {
         lobby_count := network.lobbyEntries.len
 
         for i in 0..<u64(4) {
-            buf: [32]u8
+            buf: [64]u8
             ui.add_bounds({ 150, 50 })
             if ui.button(
                 lobby_count > int(i) ? net.fmt_lobby_name(buf[:], &network.lobbyEntries.data[i]) : "--", 
