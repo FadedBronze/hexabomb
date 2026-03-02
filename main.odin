@@ -471,7 +471,7 @@ init_game :: proc(app: ^App) {
     rand.reset(app.gameInstance.seed, gen = app.gameInstance.map_random_context)
 
     app.playerCount = app.network.lobby_manager.lobby.clientCount
-    app.playerIndex = net.get_client_player_idx(&app.network)
+    app.playerIndex = net.get_client_player_idx(&app.network.lobby_manager, app.network.base)
 
     app.gameInstance.playerCount = app.playerCount
 
@@ -550,7 +550,7 @@ init_app :: proc(app: ^App, cliArgs: ^CLIArgs) {
 
     if (!net.init(&app.network, cliArgs.port, cliArgs.singleMachineTesting)) {
         app.state = .Playing
-        net.create_local_lobby(&app.network, "my lobby")
+        net.create_local_lobby(&app.network.lobby_manager, app.network.base, "my lobby")
     }    
 
     rl.InitAudioDevice()
@@ -577,7 +577,7 @@ update_app :: proc(app: ^App, dt: f32) {
 
     switch app.state {
     case .Playing:
-        if (!net.broadcast_input_state(&app.network)) {
+        if (!net.broadcast_input_state(&app.network.input_sender, &app.network.lobby_manager, &app.network.throttle_info, app.network.base)) {
             app.network.lobby_manager.state = .Failed
             app.state = .Connecting
         }
@@ -587,7 +587,7 @@ update_app :: proc(app: ^App, dt: f32) {
             app.state = .Connecting
         } 
         
-        uptodate := net.all_inputs_uptodate(&app.network)
+        uptodate := net.all_inputs_uptodate(&app.network.input_sender, &app.network.lobby_manager, app.network.base)
         
         rl.BeginDrawing()
         rl.ClearBackground(rl.WHITE)
