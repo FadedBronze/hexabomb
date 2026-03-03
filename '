@@ -3,6 +3,7 @@ package network
 import "core:net"
 import sm "core:container/small_array"
 import "core:time"
+import box "../containers"
 import "core:strings"
 import "../utils/"
 

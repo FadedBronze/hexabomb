@@ -8,10 +8,18 @@ import "../log"
 import "core:encoding/cbor"
 
 NetworkBase :: struct {
+    throttle_map: ThrottleMap,
     mask: net.IP4_Address,
     discovery: net.UDP_Socket,
     socket: net.UDP_Socket,
     myEndpoint: net.Endpoint,
+}
+
+ThrottleMap :: box.SmallMap(64, typeid, ThrottleInfo)
+
+register :: proc(base: ^NetworkBase, T: typeid, throttle_ms: u16 = 0) {
+    now := time.now()
+    box.sm_set(&base.throttle_map, T, ThrottleInfo{ now, throttle_ms })
 }
 
 apply_subnet_mask :: proc(ip: net.IP4_Address, mask: net.IP4_Address) -> net.IP4_Address {
@@ -150,10 +158,10 @@ init_base :: proc(network: ^NetworkBase, port: int, singleMachineTesting: bool) 
     return true
 }
 
-is_throttled :: proc(throttle_map: ^ThrottleMap, T: typeid) -> bool {
+is_throttled :: proc(base: ^NetworkBase, T: typeid) -> bool {
     now := time.now()
 
-    info := box.sm_get_ptr(throttle_map, T)
+    info := box.sm_get_ptr(&base.throttle_map, T)
     
     if time.diff(info.last_sent, now) > time.Millisecond * auto_cast info.delay_ms {
         info.last_sent = now
@@ -167,11 +175,11 @@ PollErr :: union {
     cbor.Unmarshal_Error,
 }
 
-poll_discovery_message :: proc(packet: ^$T, base: NetworkBase) -> PollErr {
+poll_discovery_message :: proc(packet: ^$T, base: ^NetworkBase) -> PollErr {
     return poll_message_(packet, base.discovery)
 }
 
-poll_message :: proc(packet: ^$T, base: NetworkBase) -> PollErr {
+poll_message :: proc(packet: ^$T, base: ^NetworkBase) -> PollErr {
     return poll_message_(packet, base.socket)
 }
 
@@ -184,7 +192,7 @@ poll_message_ :: proc(packet: ^$T, socket: net.UDP_Socket) -> (err: PollErr) {
 }
 
 broadcast_discovery_packet :: proc(
-    base: NetworkBase, 
+    base: ^NetworkBase, 
     packet: any, 
     singleMachineTesting := false,
 ) -> bool {
@@ -212,7 +220,7 @@ broadcast_discovery_packet :: proc(
 }
 
 broadcast_packet :: proc(
-    base: NetworkBase, 
+    base: ^NetworkBase, 
     packet: any, 
     target: net.Endpoint,
 ) -> bool {

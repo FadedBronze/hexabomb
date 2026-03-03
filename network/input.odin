@@ -45,13 +45,14 @@ init_input_send :: proc(network: ^Network) -> bool {
     }
     
     now := time.now()
-    box.sm_set(&network.throttle_info, BroadcastInputFrame, ThrottleInfo{ now, 5 })
-    box.sm_set(&network.throttle_info, NotifyRecievedInputFrame, ThrottleInfo{ now, 5 })
+
+    register(&network.base, BroadcastInputFrame, 5)
+    register(&network.base, NotifyRecievedInputFrame, 5)
 
     return true
 }
 
-all_inputs_uptodate :: proc(input_sender: ^InputSender, lobby_manager: ^LobbyManager, base: NetworkBase) -> bool {
+all_inputs_uptodate :: proc(input_sender: ^InputSender, lobby_manager: ^LobbyManager, base: ^NetworkBase) -> bool {
     if input_sender.inputQueue.len != 0 {
         return false
     }
@@ -69,7 +70,7 @@ all_inputs_uptodate :: proc(input_sender: ^InputSender, lobby_manager: ^LobbyMan
     return true
 }
 
-recieve_input_state :: proc(input_sender: ^InputSender, lobby_manager: ^LobbyManager, base: NetworkBase, broadcastInputFrame: ^BroadcastInputFrame) {
+recieve_input_state :: proc(input_sender: ^InputSender, lobby_manager: ^LobbyManager, base: ^NetworkBase, broadcastInputFrame: ^BroadcastInputFrame) {
     idx := get_endpoint_player_idx(lobby_manager, base, broadcastInputFrame.endpoint)
 
     currentFrameNumber := input_sender.inputFrameCount
@@ -98,7 +99,7 @@ recieve_input_state :: proc(input_sender: ^InputSender, lobby_manager: ^LobbyMan
 recieve_input_recieved_broadcast :: proc(
     input_sender: ^InputSender, 
     lobby_manager: ^LobbyManager, 
-    base: NetworkBase, 
+    base: ^NetworkBase, 
     broadcast: ^NotifyRecievedInputFrame
 ) {
     if input_sender.inputQueue.len == 0 {
@@ -117,10 +118,10 @@ recieve_input_recieved_broadcast :: proc(
     firstInput.sentTo[idx] = true
 }
 
-broadcast_input_state :: proc(input_sender: ^InputSender, lobby_manager: ^LobbyManager, throttle_map: ^ThrottleMap, base: NetworkBase) -> bool {
+broadcast_input_state :: proc(input_sender: ^InputSender, lobby_manager: ^LobbyManager, base: ^NetworkBase) -> bool {
     q := &input_sender.inputQueue
 
-    if is_throttled(throttle_map, BroadcastInputFrame) {
+    if is_throttled(base, BroadcastInputFrame) {
         return true
     }
     
@@ -172,7 +173,7 @@ incrementFrameNumber :: proc(input_sender: ^InputSender, inputState: ^ui.InputSt
     })
 }
 
-handle_input_packet :: proc(input_sender: ^InputSender, lobby_manager: ^LobbyManager, base: NetworkBase, b: ^InputPacket) {
+handle_input_packet :: proc(input_sender: ^InputSender, lobby_manager: ^LobbyManager, base: ^NetworkBase, b: ^InputPacket) {
     switch &v in b {
     case NotifyRecievedInputFrame:
         recieve_input_recieved_broadcast(input_sender, lobby_manager, base, &v)
@@ -181,7 +182,7 @@ handle_input_packet :: proc(input_sender: ^InputSender, lobby_manager: ^LobbyMan
     }
 }
 
-broadcast_recieved_input_state :: proc(input_sender: ^InputSender, base: NetworkBase, frameNumber: u64, endpoint: net.Endpoint) -> bool {
+broadcast_recieved_input_state :: proc(input_sender: ^InputSender, base: ^NetworkBase, frameNumber: u64, endpoint: net.Endpoint) -> bool {
     packet := Packet(InputPacket(NotifyRecievedInputFrame {
         frameNumber = frameNumber,
         endpoint = base.myEndpoint,

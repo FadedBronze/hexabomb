@@ -471,7 +471,7 @@ init_game :: proc(app: ^App) {
     rand.reset(app.gameInstance.seed, gen = app.gameInstance.map_random_context)
 
     app.playerCount = app.network.lobby_manager.lobby.clientCount
-    app.playerIndex = net.get_client_player_idx(&app.network.lobby_manager, app.network.base)
+    app.playerIndex = net.get_client_player_idx(&app.network.lobby_manager, &app.network.base)
 
     app.gameInstance.playerCount = app.playerCount
 
@@ -545,19 +545,11 @@ parse_cli_args :: proc() -> (cliArgs: CLIArgs) {
 
 init_app :: proc(app: ^App, cliArgs: ^CLIArgs) {
     init_logs(app, cliArgs.username, cliArgs.clearlogs)
-
     log.msg("debug", "single machine testing:", cliArgs.singleMachineTesting)
-
-    if (!net.init(&app.network, cliArgs.port, cliArgs.singleMachineTesting)) {
-        app.state = .Playing
-        net.create_local_lobby(&app.network.lobby_manager, app.network.base, "my lobby")
-    }    
-
+    net.init(&app.network, cliArgs.port, cliArgs.singleMachineTesting)
     rl.InitAudioDevice()
     init_audio("./sfx/", &app.audio)
-
     play_audio("music.mp3")
-    
     net.incrementFrameNumber(&app.network.input_sender, &app.currentClientInputState)
 }
 
@@ -577,25 +569,15 @@ update_app :: proc(app: ^App, dt: f32) {
 
     switch app.state {
     case .Playing:
-        if (!net.broadcast_input_state(&app.network.input_sender, &app.network.lobby_manager, &app.network.throttle_info, app.network.base)) {
-            app.network.lobby_manager.state = .Failed
+        if (!net.update(&app.network)) {
             app.state = .Connecting
         }
-
-        if (!net.recieve_messages(&app.network)) {
-            app.network.lobby_manager.state = .Failed
-            app.state = .Connecting
-        } 
         
-        uptodate := net.all_inputs_uptodate(&app.network.input_sender, &app.network.lobby_manager, app.network.base)
+        uptodate := net.all_inputs_uptodate(&app.network.input_sender, &app.network.lobby_manager, &app.network.base)
         
         rl.BeginDrawing()
         rl.ClearBackground(rl.WHITE)
-           
-        if app.network.lobby_manager.state == .Failed {
-            app.state = .Connecting
-        }
-
+        
         for i in 0..<app.playerCount {
             player := &app.gameInstance.players[i]
             frameContext: ui.FrameInfo
