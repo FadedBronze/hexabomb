@@ -39,9 +39,9 @@ Network :: struct {
 init :: proc(network: ^Network, port: int, singleMachineTesting: bool) -> bool {
     network.singleMachineTesting = singleMachineTesting
  
-    init_input_send(network) or_return
-    init_lobby(&network.lobby_manager, &network.base)
     init_base(&network.base, port, singleMachineTesting) or_return
+    init_lobby(&network.lobby_manager, &network.base)
+    init_input_send(&network.input_sender, &network.lobby_manager, &network.base) or_return
 
     return true
 }
@@ -60,9 +60,9 @@ recieve_messages :: proc(network: ^Network) -> bool {
         }
         switch &b in broadcast {
         case InputPacket:
-            handle_input_packet(&network.input_sender, &network.lobby_manager, &network.base, &b)
+            handle_input_packet(&network.input_sender, &b)
         case LobbyPacket:
-            handle_lobby_packet(&network.lobby_manager, &network.base, &b)
+            handle_lobby_packet(&network.lobby_manager, &b)
         }
     }
     return true
@@ -80,18 +80,18 @@ recieve_discovery_messages :: proc(network: ^Network) -> bool {
                 log.msg("error", err)
                 return false
         }
-        master := client_is_lobby_master(&network.lobby_manager, &network.base)
+        master := client_is_lobby_master(&network.lobby_manager)
         switch &v in &broadcast {
         case BroadcastLobbyEntry:
             if network.lobby_manager.state == .Connecting {
-                retrieve_lobby_entries(&network.lobby_manager, &network.base, &v)
+                retrieve_lobby_entries(&network.lobby_manager, &v)
             }
         }
     }
 }
 
 update :: proc(network: ^Network) -> bool {
-    if (!broadcast_input_state(&network.input_sender, &network.lobby_manager, &network.base)) {
+    if (!broadcast_input_state(&network.input_sender)) {
         network.lobby_manager.state = .Failed
         return false
     }

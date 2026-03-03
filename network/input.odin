@@ -2,7 +2,6 @@ package network
 
 import "../ui"
 import "core:container/queue"
-import box "../containers"
 import "core:time"
 import "core:net"
 import "../log"
@@ -29,6 +28,9 @@ InputSender :: struct {
 
     inputFrameCount: u64,
     inputQueue: queue.Queue(InputFrameSent),
+
+    lobby_manager: ^LobbyManager,
+    base: ^NetworkBase,
 }
 
 InputFrameSent :: struct {
@@ -37,8 +39,9 @@ InputFrameSent :: struct {
     inputFrame: ui.InputState,
 }
 
-init_input_send :: proc(network: ^Network) -> bool {
-    err := queue.init(&network.input_sender.inputQueue)
+init_input_send :: proc(input_sender: ^InputSender, lobby_manager: ^LobbyManager, base: ^NetworkBase) -> bool {
+    err := queue.init(&input_sender.inputQueue)
+
     if err != nil {
         log.msg("error", err)
         return false
@@ -46,19 +49,25 @@ init_input_send :: proc(network: ^Network) -> bool {
     
     now := time.now()
 
-    register(&network.base, BroadcastInputFrame, 5)
-    register(&network.base, NotifyRecievedInputFrame, 5)
+    register(base, BroadcastInputFrame, 5)
+    register(base, NotifyRecievedInputFrame, 5)
+
+    input_sender.base = base
+    input_sender.lobby_manager = lobby_manager
 
     return true
 }
 
-all_inputs_uptodate :: proc(input_sender: ^InputSender, lobby_manager: ^LobbyManager, base: ^NetworkBase) -> bool {
+all_inputs_uptodate :: proc(input_sender: ^InputSender) -> bool {
     if input_sender.inputQueue.len != 0 {
         return false
     }
 
+    lobby_manager := input_sender.lobby_manager
+    base := input_sender.base
+
     for i in 0..<lobby_manager.lobby.clientCount {
-        if i == get_client_player_idx(lobby_manager, base) {
+        if i == get_client_player_idx(lobby_manager) {
             continue
         }
         
@@ -70,15 +79,18 @@ all_inputs_uptodate :: proc(input_sender: ^InputSender, lobby_manager: ^LobbyMan
     return true
 }
 
-recieve_input_state :: proc(input_sender: ^InputSender, lobby_manager: ^LobbyManager, base: ^NetworkBase, broadcastInputFrame: ^BroadcastInputFrame) {
-    idx := get_endpoint_player_idx(lobby_manager, base, broadcastInputFrame.endpoint)
+recieve_input_state :: proc(input_sender: ^InputSender, broadcastInputFrame: ^BroadcastInputFrame) {
+    lobby_manager := input_sender.lobby_manager
+    base := input_sender.base
+
+    idx := get_endpoint_player_idx(lobby_manager, broadcastInputFrame.endpoint)
 
     currentFrameNumber := input_sender.inputFrameCount
     newFrameNumber := broadcastInputFrame.frameNumber
 
     if newFrameNumber == currentFrameNumber-1 {
         log.msg("debug", newFrameNumber, currentFrameNumber)
-        broadcast_recieved_input_state(input_sender, base, broadcastInputFrame.frameNumber, broadcastInputFrame.endpoint)
+        broadcast_recieved_input_state(input_sender, broadcastInputFrame.frameNumber, broadcastInputFrame.endpoint)
     }
     
     if newFrameNumber != currentFrameNumber {
@@ -93,15 +105,16 @@ recieve_input_state :: proc(input_sender: ^InputSender, lobby_manager: ^LobbyMan
     input_sender.inputFrames[idx] = broadcastInputFrame.inputFrame
     input_sender.currentInputFrameNumbers[idx] = broadcastInputFrame.frameNumber
     
-    broadcast_recieved_input_state(input_sender, base, broadcastInputFrame.frameNumber, broadcastInputFrame.endpoint)
+    broadcast_recieved_input_state(input_sender, broadcastInputFrame.frameNumber, broadcastInputFrame.endpoint)
 }
 
 recieve_input_recieved_broadcast :: proc(
     input_sender: ^InputSender, 
-    lobby_manager: ^LobbyManager, 
-    base: ^NetworkBase, 
     broadcast: ^NotifyRecievedInputFrame
 ) {
+    lobby_manager := input_sender.lobby_manager
+    base := input_sender.base
+
     if input_sender.inputQueue.len == 0 {
         return
     }
@@ -114,11 +127,14 @@ recieve_input_recieved_broadcast :: proc(
         return
     }
 
-    idx := get_endpoint_player_idx(lobby_manager, base, broadcast.endpoint)
+    idx := get_endpoint_player_idx(lobby_manager, broadcast.endpoint)
     firstInput.sentTo[idx] = true
 }
 
-broadcast_input_state :: proc(input_sender: ^InputSender, lobby_manager: ^LobbyManager, base: ^NetworkBase) -> bool {
+broadcast_input_state :: proc(input_sender: ^InputSender) -> bool {
+    lobby_manager := input_sender.lobby_manager
+    base := input_sender.base
+
     q := &input_sender.inputQueue
 
     if is_throttled(base, BroadcastInputFrame) {
@@ -134,7 +150,7 @@ broadcast_input_state :: proc(input_sender: ^InputSender, lobby_manager: ^LobbyM
     sentCount := 0
     
     for i in 0..<lobby_manager.lobby.clientCount {
-        if i == get_client_player_idx(lobby_manager, base) {
+        if i == get_client_player_idx(lobby_manager) {
             continue
         }
 
@@ -173,16 +189,21 @@ incrementFrameNumber :: proc(input_sender: ^InputSender, inputState: ^ui.InputSt
     })
 }
 
-handle_input_packet :: proc(input_sender: ^InputSender, lobby_manager: ^LobbyManager, base: ^NetworkBase, b: ^InputPacket) {
+handle_input_packet :: proc(input_sender: ^InputSender, b: ^InputPacket) {
+    lobby_manager := input_sender.lobby_manager
+    base := input_sender.base
+
     switch &v in b {
     case NotifyRecievedInputFrame:
-        recieve_input_recieved_broadcast(input_sender, lobby_manager, base, &v)
+        recieve_input_recieved_broadcast(input_sender, &v)
     case BroadcastInputFrame:
-        recieve_input_state(input_sender, lobby_manager, base, &v)
+        recieve_input_state(input_sender, &v)
     }
 }
 
-broadcast_recieved_input_state :: proc(input_sender: ^InputSender, base: ^NetworkBase, frameNumber: u64, endpoint: net.Endpoint) -> bool {
+broadcast_recieved_input_state :: proc(input_sender: ^InputSender, frameNumber: u64, endpoint: net.Endpoint) -> bool {
+    base := input_sender.base
+
     packet := Packet(InputPacket(NotifyRecievedInputFrame {
         frameNumber = frameNumber,
         endpoint = base.myEndpoint,

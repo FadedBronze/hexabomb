@@ -471,7 +471,7 @@ init_game :: proc(app: ^App) {
     rand.reset(app.gameInstance.seed, gen = app.gameInstance.map_random_context)
 
     app.playerCount = app.network.lobby_manager.lobby.clientCount
-    app.playerIndex = net.get_client_player_idx(&app.network.lobby_manager, &app.network.base)
+    app.playerIndex = net.get_client_player_idx(&app.network.lobby_manager)
 
     app.gameInstance.playerCount = app.playerCount
 
@@ -573,7 +573,7 @@ update_app :: proc(app: ^App, dt: f32) {
             app.state = .Connecting
         }
         
-        uptodate := net.all_inputs_uptodate(&app.network.input_sender, &app.network.lobby_manager, &app.network.base)
+        uptodate := net.all_inputs_uptodate(&app.network.input_sender)
         
         rl.BeginDrawing()
         rl.ClearBackground(rl.WHITE)

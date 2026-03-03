@@ -55,6 +55,7 @@ LobbyManager :: struct {
     state: NetworkState,
     lobbyEntries: sm.Small_Array(MAX_LOBBIES, LobbyEntry),
     lobby: Lobby,
+    base: ^NetworkBase,
 }
 
 init_lobby :: proc(lobby_manager: ^LobbyManager, base: ^NetworkBase) {
@@ -65,9 +66,12 @@ init_lobby :: proc(lobby_manager: ^LobbyManager, base: ^NetworkBase) {
     register(base, BroadcastLobbyInfo, 500)
     register(base, BroadcastLobbyStartGame, 500)
     register(base, RequestLobbyJoin, 500)
+
+    lobby_manager.base = base
 }
 
-create_local_lobby :: proc(lobby_manager: ^LobbyManager, base: ^NetworkBase, name: string) {
+create_local_lobby :: proc(lobby_manager: ^LobbyManager, name: string) {
+    base := lobby_manager.base
     lobby_manager.lobby = Lobby {
         creatorIdx = 0,
         clientCount = 1,
@@ -79,17 +83,19 @@ create_local_lobby :: proc(lobby_manager: ^LobbyManager, base: ^NetworkBase, nam
     }
 }
 
-create_lobby :: proc(lobby_manager: ^LobbyManager, base: ^NetworkBase, name: string, singleMachineTesting := false) {
-    create_local_lobby(lobby_manager, base, name)
-    broadcast_my_lobby_entry(lobby_manager, base, singleMachineTesting)
+create_lobby :: proc(lobby_manager: ^LobbyManager, name: string, singleMachineTesting := false) {
+    base := lobby_manager.base
+    create_local_lobby(lobby_manager, name)
+    broadcast_my_lobby_entry(lobby_manager, singleMachineTesting)
 }
 
-get_client_player_idx :: proc(lobby_manager: ^LobbyManager, base: ^NetworkBase) -> u8 {
+get_client_player_idx :: proc(lobby_manager: ^LobbyManager) -> u8 {
+    base := lobby_manager.base
     assert(lobby_manager.lobby.clientCount != 0)
-    return get_endpoint_player_idx(lobby_manager, base, base.myEndpoint)
+    return get_endpoint_player_idx(lobby_manager, base.myEndpoint)
 }
 
-get_endpoint_player_idx :: proc(lobby_manager: ^LobbyManager, base: ^NetworkBase, endpoint: net.Endpoint) -> u8 {
+get_endpoint_player_idx :: proc(lobby_manager: ^LobbyManager, endpoint: net.Endpoint) -> u8 {
     for client, i in lobby_manager.lobby.clients[:lobby_manager.lobby.clientCount] {
         if client.endpoint == endpoint {
             return u8(i)
@@ -99,11 +105,12 @@ get_endpoint_player_idx :: proc(lobby_manager: ^LobbyManager, base: ^NetworkBase
     return MAX_CLIENTS
 }
 
-client_is_lobby_master :: proc(lobby_manager: ^LobbyManager, base: ^NetworkBase) -> bool {
+client_is_lobby_master :: proc(lobby_manager: ^LobbyManager) -> bool {
+    base := lobby_manager.base
     return lobby_manager.lobby.clients[lobby_manager.lobby.creatorIdx].endpoint == base.myEndpoint
 }
 
-retrieve_lobby_entries :: proc(lobby_manager: ^LobbyManager, base: ^NetworkBase, broadcast: ^BroadcastLobbyEntry) {
+retrieve_lobby_entries :: proc(lobby_manager: ^LobbyManager, broadcast: ^BroadcastLobbyEntry) {
     for i in 0..<lobby_manager.lobbyEntries.len {
         lobbyEntry := lobby_manager.lobbyEntries.data[i]
 
@@ -118,71 +125,62 @@ retrieve_lobby_entries :: proc(lobby_manager: ^LobbyManager, base: ^NetworkBase,
     sm.append_elem(&lobby_manager.lobbyEntries, entry)
 }
 
-broadcast_my_lobby_info :: proc(lobby_manager: ^LobbyManager, base: ^NetworkBase, target: net.Endpoint) {
-    assert(client_is_lobby_master(lobby_manager, base))
-
+broadcast_my_lobby_info :: proc(lobby_manager: ^LobbyManager, target: net.Endpoint) {
+    base := lobby_manager.base
+    assert(client_is_lobby_master(lobby_manager))
     packet := Packet(LobbyPacket(BroadcastLobbyInfo {
         lobby = lobby_manager.lobby,
     }))
-    
     if is_throttled(base, BroadcastLobbyInfo) {
         return
     }
-
     broadcast_packet(base, packet, target)
 }
 
-broadcast_game_start :: proc(lobby_manager: ^LobbyManager, base: ^NetworkBase) -> bool {
+broadcast_game_start :: proc(lobby_manager: ^LobbyManager) -> bool {
+    base := lobby_manager.base
     packet := Packet(LobbyPacket(BroadcastLobbyStartGame {}))
-
     if is_throttled(base, BroadcastLobbyStartGame) {
         return true
     }
-    
     for i in 0..<lobby_manager.lobby.clientCount {
         broadcast_packet(base, packet, lobby_manager.lobby.clients[i].endpoint) or_return
     }
-
     return true
 }
 
-broadcast_my_lobby_entry :: proc(lobby_manager: ^LobbyManager, base: ^NetworkBase, singleMachineTesting := false) -> bool {
+broadcast_my_lobby_entry :: proc(lobby_manager: ^LobbyManager, singleMachineTesting := false) -> bool {
+    base := lobby_manager.base
     assert(lobby_manager.lobby.clientCount != 0)
-    assert(client_is_lobby_master(lobby_manager, base))
-
+    assert(client_is_lobby_master(lobby_manager))
     packet := DiscoveryPacket(BroadcastLobbyEntry {
         entry = LobbyEntry {
             endpoint = base.myEndpoint,
             name = lobby_manager.lobby.name,
         }
     })
-
     if is_throttled(base, BroadcastLobbyEntry) {
         return true
     }
-    
     broadcast_discovery_packet(base, packet, singleMachineTesting)
-
     return true
 }
 
-accept_join_lobby :: proc(lobby_manager: ^LobbyManager, base: ^NetworkBase, broadcast: ^RequestLobbyJoin) {
+accept_join_lobby :: proc(lobby_manager: ^LobbyManager, broadcast: ^RequestLobbyJoin) {
     lobby_manager.lobby.clients[lobby_manager.lobby.clientCount] = Client {
         endpoint = broadcast.endpoint,
     }
-
     lobby_manager.lobby.clientCount += 1
-    
-    broadcast_my_lobby_info(lobby_manager, base, broadcast.endpoint)
+    broadcast_my_lobby_info(lobby_manager, broadcast.endpoint)
 }
 
-request_join_lobby :: proc(lobby_manager: ^LobbyManager, base: ^NetworkBase, endpoint: net.Endpoint) -> bool {
+request_join_lobby :: proc(lobby_manager: ^LobbyManager, endpoint: net.Endpoint) -> bool {
+    base := lobby_manager.base
     packet := Packet(LobbyPacket(
         RequestLobbyJoin {
             endpoint = base.myEndpoint,
         }
     ))
-
     return broadcast_packet(base, packet, target = endpoint)
 }
 
@@ -190,8 +188,9 @@ fmt_lobby_name :: proc(buf: []u8, lobby: ^LobbyEntry) -> string {
     return utils.concatenate(buf[:], net.endpoint_to_string(lobby.endpoint), " | ", lobby.name)
 }
 
-handle_lobby_packet :: proc(lobby_manager: ^LobbyManager, base: ^NetworkBase, packet: ^LobbyPacket) {
-    master := client_is_lobby_master(lobby_manager, base)
+handle_lobby_packet :: proc(lobby_manager: ^LobbyManager, packet: ^LobbyPacket) {
+    base := &lobby_manager.base
+    master := client_is_lobby_master(lobby_manager)
 
     switch &v in packet {
     case BroadcastLobbyInfo:
@@ -205,7 +204,7 @@ handle_lobby_packet :: proc(lobby_manager: ^LobbyManager, base: ^NetworkBase, pa
         }
     case RequestLobbyJoin:
         if master && lobby_manager.state == .InLobby {
-            accept_join_lobby(lobby_manager, base, &v)
+            accept_join_lobby(lobby_manager, &v)
         }
     }
 }
@@ -244,8 +243,8 @@ update_network_interface :: proc(network: ^Network) {
         buf[1] = '\x00'
         rl.DrawText(transmute(cstring)raw_data(buf[:]), 10, 10, 24, rl.WHITE)
 
-        if client_is_lobby_master(&network.lobby_manager, &network.base) {
-            if !broadcast_my_lobby_entry(&network.lobby_manager, &network.base, network.singleMachineTesting) {
+        if client_is_lobby_master(&network.lobby_manager) {
+            if !broadcast_my_lobby_entry(&network.lobby_manager, network.singleMachineTesting) {
                 network.lobby_manager.state = .Failed
                 return
             }
@@ -260,7 +259,7 @@ update_network_interface :: proc(network: ^Network) {
 
             if start {
                 network.lobby_manager.state = .Connected
-                if !broadcast_game_start(&network.lobby_manager, &network.base) {
+                if !broadcast_game_start(&network.lobby_manager) {
                     network.lobby_manager.state = .Failed
                     return
                 } 
@@ -292,7 +291,7 @@ update_network_interface :: proc(network: ^Network) {
                 rl.GRAY, 
                 id = i
             ) && lobby_count > int(i) {
-                if (!request_join_lobby(&network.lobby_manager, &network.base, network.lobby_manager.lobbyEntries.data[i].endpoint)) {
+                if (!request_join_lobby(&network.lobby_manager, network.lobby_manager.lobbyEntries.data[i].endpoint)) {
                     network.lobby_manager.state = .Failed
                     return
                 }
@@ -310,7 +309,7 @@ update_network_interface :: proc(network: ^Network) {
         ui.pop_layout()
 
         if (create_room) {
-            create_lobby(&network.lobby_manager, &network.base, "the room", network.singleMachineTesting)
+            create_lobby(&network.lobby_manager, "the room", network.singleMachineTesting)
             network.lobby_manager.state = .InLobby
         }
     }        
