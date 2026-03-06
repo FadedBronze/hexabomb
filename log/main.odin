@@ -6,8 +6,13 @@ import "core:time"
 import "core:fmt"
 import utils "../utils"
 
+LogLevel :: struct {
+    handle: os.Handle,
+    stdout: bool,
+}
+
 FileLogger :: struct {
-    handles: map[string]os.Handle,
+    handles: map[string]LogLevel,
     directory: string,
     stdout: bool,
 }
@@ -15,7 +20,7 @@ FileLogger :: struct {
 @(private="file")
 _logger: FileLogger
 
-init :: proc(directory: string, stdout := false) {
+init :: proc(directory: string) {
     buf: [64]u8
     path := utils.concatenate(buf[:], "./logs/", directory, "/")
     err := os.make_directory(path, os.O_CREATE)
@@ -25,9 +30,8 @@ init :: proc(directory: string, stdout := false) {
         assert(false)
     }
 
-    _logger.stdout = stdout
     _logger.directory = directory
-    _logger.handles = make(map[string]os.Handle)
+    _logger.handles = make(map[string]LogLevel)
 }
 
 clear :: proc(file: string) {
@@ -40,18 +44,19 @@ clear :: proc(file: string) {
 }
 
 @(private="file")
-_get_handle :: proc(file: string) -> (ok: bool, handle: os.Handle) {
-    handle, ok = _logger.handles[file]
+_get_handle :: proc(file: string) -> (ok: bool, level: LogLevel) {
+    level, ok = _logger.handles[file]
 
     if ok {
-        return true, handle
+        return true, level
     }
 
     buf: [64]u8
     path := utils.concatenate(buf[:], "./logs/", _logger.directory, "/", file, ".txt")
 
-    err: os.Error
-    handle, err = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREATE)
+    handle, err := os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREATE)
+
+    level.handle = handle
 
     switch err {
     case .Permission_Denied, .Invalid_File, .Timeout, .Not_Exist, .Closed:
@@ -63,9 +68,22 @@ _get_handle :: proc(file: string) -> (ok: bool, handle: os.Handle) {
         unreachable()
     }
     
-    _logger.handles[file] = handle
+    _logger.handles[file] = level
 
-    return true, handle
+    return true, level
+}
+
+set_stdout :: proc(file: string, stdout: bool) -> bool {
+    data, ok := _logger.handles[file]
+    if !ok {
+        ok, data = _get_handle(file)
+        if !ok {
+            return false
+        }
+    }
+    data.stdout = stdout
+    _logger.handles[file] = data
+    return true
 }
 
 msg :: proc(file: string, data: ..any, loc := #caller_location) {
@@ -76,17 +94,17 @@ msg :: proc(file: string, data: ..any, loc := #caller_location) {
 
     str := fmt.sbprintln(&sb, "[", t, "](", loc, ") ", data, sep = "")
 
-    if _logger.stdout {
+    ok, level := _get_handle(file)
+    
+    if level.stdout {
         fmt.println(str)
     }
-
-    ok, handle := _get_handle(file)
 
     if !ok {
         assert(false)
     }
 
-    _, err := os.write_string(handle, str)
+    _, err := os.write_string(level.handle, str)
 
     switch err {
     case .Permission_Denied, .Timeout, .Not_Exist, .Closed, .Invalid_File:

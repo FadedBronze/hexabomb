@@ -494,7 +494,8 @@ init_game :: proc(app: ^App) {
 }
 
 init_logs :: proc(app: ^App, clientName: string, clearlogs: bool) {
-    log.init(clientName, true)
+    log.init(clientName)
+    log.set_stdout("debug", true)
 
     if !clearlogs {
         log.msg("debug", "New Session")
